@@ -1,0 +1,20 @@
+# Python 3.11 environment for audio analysis (numpy/scipy/librosa/mir_eval) + CUDA
+#
+# Install with:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
+#
+# The --extra-index-url is required because the "+cu121" CUDA build of torch
+# is not published on plain PyPI. NVIDIA driver >= 530 is required on the host
+# (verified here with driver 535.309.01).
+
+numpy==2.4.6
+scipy==1.17.1
+librosa==0.11.0
+mir_eval==0.8.2
+
+# CUDA-enabled PyTorch (pulls in matching nvidia-*-cu12 runtime libs automatically)
+torch==2.3.1+cu121
+
+# NVIDIA CUDA toolkit / Python bindings (for direct CUDA access outside torch)
+cuda-toolkit==13.0.3.0
+cuda-bindings==13.3.1
