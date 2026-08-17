@@ -1,1 +1,9 @@
 .claude/
+.venv/
+__pycache__/
+.pytest_cache/
+src/dataset_validation.html
+src/mix_pairing_validation.html
+src/visualization/combined_plots.png
+src/visualization/plots/
+src/statistics/audio_quality_reports/

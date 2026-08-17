@@ -1,0 +1,102 @@
+"""
+K-fold evaluation harness for heart/lung separation models on the mix set.
+
+Wires split.py's leakage-safe fold assignment into metrics.py's BSS Eval:
+for each fold, a caller-supplied function fits a dictionary/model on that
+fold's allowed HS/LS recordings only (i.e. excluding anything that also
+appears in that fold's held-out mixtures) and returns a separation
+function, which is then evaluated on the held-out mix rows. Results are
+tagged by fold and source, then aggregated two ways:
+  - per-fold means (one row per fold x source)
+  - across-fold mean +/- std (the CV estimate of generalization performance)
+
+Usage:
+    from eval_harness import cross_validate
+
+    def fit_and_separate(hs_allowed, ls_allowed):
+        dictionary = my_dictionary_learning(hs_allowed, ls_allowed)
+        def separate(mixed, sr):
+            return my_separation(mixed, sr, dictionary)
+        return separate
+
+    results_df, fold_summary, cv_summary = cross_validate(fit_and_separate, n_folds=5, seed=0)
+"""
+import pandas as pd
+
+from load_dataset import load_hs, load_ls
+from metrics import SOURCE_LABELS, evaluate_dataset
+from split import assign_folds, dictionary_pool
+
+
+def cross_validate(fit_and_separate_fn, n_folds: int = 5, seed: int = 0, compute_permutation: bool = True):
+    """
+    Run leakage-safe k-fold cross-validation.
+
+    fit_and_separate_fn: callable(hs_allowed: pd.DataFrame, ls_allowed: pd.DataFrame) -> separate_fn
+        Called once per fold with that fold's allowed dictionary-fitting pool
+        (HS.csv/LS.csv rows, in load_dataset.load_hs()/load_ls() format, with
+        every recording that appears in the held-out fold's mixtures already
+        removed). Must return separate_fn(mixed, sr) -> (heart_est, lung_est).
+
+    Returns:
+        results_df: one row per (fold, Mixed Sound ID, source) -> sdr/sir/sar
+                     plus the row's class/location labels.
+        fold_summary: mean sdr/sir/sar per (fold, source).
+        cv_summary: mean +/- std across folds per source -- the headline
+                     cross-validated result.
+    """
+    hs_df, ls_df = load_hs(), load_ls()
+    mix_df = assign_folds(n_folds=n_folds, seed=seed)
+
+    fold_results = []
+    for k in sorted(mix_df["fold"].unique()):
+        eval_rows = mix_df[mix_df["fold"] == k].reset_index(drop=True)
+        hs_allowed, ls_allowed = dictionary_pool(hs_df, ls_df, mix_df, held_out_fold=k)
+
+        separate_fn = fit_and_separate_fn(hs_allowed, ls_allowed)
+        result = evaluate_dataset(separate_fn, mix_df=eval_rows, compute_permutation=compute_permutation)
+        result["fold"] = k
+        fold_results.append(result)
+
+    results_df = pd.concat(fold_results, ignore_index=True)
+    fold_summary = aggregate_by_fold(results_df)
+    cv_summary = aggregate_across_folds(fold_summary)
+    return results_df, fold_summary, cv_summary
+
+
+def aggregate_by_fold(results_df: pd.DataFrame) -> pd.DataFrame:
+    """Mean sdr/sir/sar per (fold, source)."""
+    return results_df.groupby(["fold", "source"])[["sdr", "sir", "sar"]].mean().reset_index()
+
+
+def aggregate_across_folds(fold_summary: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mean +/- std across folds per source -- the CV estimate of how the
+    model generalizes to held-out (leakage-free) mixtures, with std
+    reflecting fold-to-fold variance rather than pooling all rows together.
+    """
+    return (
+        fold_summary.groupby("source")[["sdr", "sir", "sar"]]
+        .agg(["mean", "std"])
+        .reindex(SOURCE_LABELS)
+    )
+
+
+if __name__ == "__main__":
+    # Smoke test with two baselines that don't actually use the dictionary pool,
+    # just to exercise the fold machinery end-to-end against real dataset audio.
+    def identity_baseline(_hs_allowed, _ls_allowed):
+        # "Fits" nothing; separate_fn just isn't given the mixed signal's ground
+        # truth, so this is really testing plumbing, not separation quality.
+        def separate(mixed, _sr):
+            return mixed, mixed  # no-separation baseline
+
+        return separate
+
+    results_df, fold_summary, cv_summary = cross_validate(identity_baseline, n_folds=5, seed=0)
+
+    print(f"{len(results_df)} (fold, mix row, source) evaluations across {results_df['fold'].nunique()} folds\n")
+    print("Per-fold means:")
+    print(fold_summary.to_string(index=False))
+    print("\nAcross-fold mean +/- std (headline CV result):")
+    print(cv_summary.to_string())

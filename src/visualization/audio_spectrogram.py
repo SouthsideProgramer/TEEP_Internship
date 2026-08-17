@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "HLS-CMDS" / "Examples"
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "HLS-CMDS" / "Examples"
 
 
 def plot_mel_spectrograms(audio_files):

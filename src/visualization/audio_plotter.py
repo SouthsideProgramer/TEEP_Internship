@@ -27,7 +27,7 @@ import os
 from pathlib import Path
 import IPython.display as ipd
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "HLS-CMDS" / "Examples"
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "HLS-CMDS" / "Examples"
 
 def plot_audio_waveform(audio_path, ax, title):
     """
