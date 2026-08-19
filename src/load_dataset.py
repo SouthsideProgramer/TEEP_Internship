@@ -10,9 +10,10 @@ Usage:
 import wave
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "HLS-CMDS" / "Dataset.v2"
+DATA_DIR = Path(__file__).resolve().parent.parent / "HLS_CMDS"
 
 # LS.csv's "Lung Sound ID" column uses different abbreviations for these two
 # types than the filenames actually stored under LS/, e.g. the CSV has
@@ -47,7 +48,7 @@ def load_ls() -> pd.DataFrame:
 
 def load_mix() -> pd.DataFrame:
     df = _clean(pd.read_csv(DATA_DIR / "Mix.csv"))
-    mix_dir = str(DATA_DIR / "mix")
+    mix_dir = str(DATA_DIR / "Mix")
     df["heart_audio_path"] = mix_dir + "/" + df["Heart Sound ID"] + ".wav"
     df["lung_audio_path"] = mix_dir + "/" + df["Lung Sound ID"] + ".wav"
     df["mixed_audio_path"] = mix_dir + "/" + df["Mixed Sound ID"] + ".wav"
@@ -623,6 +624,67 @@ def verify_mix_triplets() -> dict:
     return {"id_checks": id_checks, "triplets": triplets}
 
 
+def verify_additive_triplets(mix_df: pd.DataFrame | None = None, residual_threshold: float = 1e-3) -> dict:
+    """
+    Test each Mix.csv row for mixed ~= a * (heart + lung) -- the assumption
+    every separation baseline and BSS Eval score in this pipeline relies on.
+    verify_mix_triplets() only checks that the three files exist, are
+    uniquely paired, and share format; it says nothing about whether the
+    mixed recording is actually related to the heart/lung files named
+    alongside it, which is a separate, silent failure mode (see
+    TEEP2026_Sprint0_Review: 109/145 rows on the GitHub copy of this
+    dataset turned out to be acoustically unrelated to their named sources).
+
+    For each row, fits the least-squares scalar gain a minimizing
+    ||mixed - a*(heart+lung)||^2 (a = <mixed, summed> / <summed, summed>),
+    then reports the relative residual ||mixed - a*summed|| / ||mixed||. A
+    row is "additive" (usable as paired ground truth) when that residual
+    falls below residual_threshold.
+
+    Sensitivity note: on the data audited so far this measure is empirically
+    bimodal -- genuinely additive rows land at residual ~1e-8-1e-4 (limited
+    by 16-bit quantization), unrelated rows land at residual ~1 (no shared
+    energy at all) -- with no rows in between, so the exact threshold value
+    is not load-bearing across that gap. If a future dataset copy produces
+    rows near the threshold, that gap assumption should be re-checked rather
+    than assumed.
+
+    Returns {"rows": [{"mixed_id", "gain", "relative_residual",
+    "correlation", "additive": bool}, ...], "valid_ids": set of Mixed Sound
+    IDs classified additive}.
+    """
+    mix_df = mix_df if mix_df is not None else load_mix()
+
+    rows = []
+    for _, row in mix_df.iterrows():
+        heart, _sr = load_audio(row["heart_audio_path"], sr=None)
+        lung, _sr = load_audio(row["lung_audio_path"], sr=None)
+        mixed, _sr = load_audio(row["mixed_audio_path"], sr=None)
+        n = min(len(heart), len(lung), len(mixed))
+        heart, lung, mixed = heart[:n], lung[:n], mixed[:n]
+
+        summed = heart + lung
+        denom = float(np.dot(summed, summed))
+        gain = float(np.dot(mixed, summed) / denom) if denom > 0 else 0.0
+        residual_norm = float(np.linalg.norm(mixed - gain * summed))
+        mixed_norm = float(np.linalg.norm(mixed))
+        relative_residual = residual_norm / mixed_norm if mixed_norm > 0 else float("inf")
+        correlation = (
+            float(np.corrcoef(mixed, summed)[0, 1]) if np.std(summed) > 0 and np.std(mixed) > 0 else 0.0
+        )
+
+        rows.append({
+            "mixed_id": row["Mixed Sound ID"],
+            "gain": gain,
+            "relative_residual": relative_residual,
+            "correlation": correlation,
+            "additive": relative_residual < residual_threshold,
+        })
+
+    valid_ids = {r["mixed_id"] for r in rows if r["additive"]}
+    return {"rows": rows, "valid_ids": valid_ids}
+
+
 def generate_pairing_report(output_path: Path | str | None = None) -> Path:
     """Render the M/H/L triplet-pairing verification as a self-contained HTML report."""
     result = verify_mix_triplets()
@@ -752,3 +814,14 @@ if __name__ == "__main__":
 
     pairing_report_path = generate_pairing_report()
     print(f"Pairing report written to {pairing_report_path}")
+
+    with wave.open(mix_df.loc[0, "mixed_audio_path"]) as w:
+        sample_rate = w.getframerate()
+
+    additivity = verify_additive_triplets(mix_df)
+    print(
+        f"\nSample rate: {sample_rate} Hz\n"
+        f"Additivity check (mixed ~= a*(heart+lung)): "
+        f"{len(additivity['valid_ids'])}/{len(mix_df)} rows additive "
+        f"(residual_threshold={1e-3:g})"
+    )

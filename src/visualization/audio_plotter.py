@@ -19,6 +19,7 @@ doi: 10.1109/IEEEDATA.2025.3566012.
 © 2024 by Yasaman Torabi. All rights reserved.
 """
 
+import sys
 import librosa
 import librosa.display
 import matplotlib.pyplot as plt
@@ -27,7 +28,25 @@ import os
 from pathlib import Path
 import IPython.display as ipd
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "HLS-CMDS" / "Examples"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+from load_dataset import load_hs, load_ls
+
+
+def _example_rows():
+    """
+    Three illustrative recordings pulled straight from the live dataset
+    (two heart conditions + one lung condition) instead of a fixed
+    Examples/ folder, which the dataset no longer ships.
+    """
+    hs_df, ls_df = load_hs(), load_ls()
+    heart_af = hs_df[hs_df["Heart Sound Type"] == "Atrial Fibrillation"].iloc[0]
+    heart_s3 = hs_df[hs_df["Heart Sound Type"] == "S3"].iloc[0]
+    lung_wheeze = ls_df[ls_df["Lung Sound Type"] == "Wheezing"].iloc[0]
+    return [
+        (heart_af["audio_path"], "Atrial Fibrillation"),
+        (heart_s3["audio_path"], "S3"),
+        (lung_wheeze["audio_path"], "Wheezing"),
+    ]
 
 def plot_audio_waveform(audio_path, ax, title):
     """
@@ -94,17 +113,13 @@ def play_audio(audio_path):
 
 
 if __name__ == "__main__":
-    # Example usage
-    audio_files = [
-        str(EXAMPLES_DIR / 'M_AF_LC.wav'),
-        str(EXAMPLES_DIR / 'M_S3_C_RUSB.wav'),
-        str(EXAMPLES_DIR / 'M_W_RLA.wav')
-    ]
-    titles = ['AF_LC', 'S3_C_RUSB', 'W_RLA']
+    examples = _example_rows()
+    audio_files = [path for path, _title in examples]
+    titles = [title for _path, title in examples]
 
     # Plot and save combined waveforms
     plot_combined_waveforms(audio_files, titles)
 
     # Play one of the audio files
-    audio_to_play = str(EXAMPLES_DIR / 'M_W_RLA.wav')
+    audio_to_play = audio_files[-1]  # the lung example
     play_audio(audio_to_play)

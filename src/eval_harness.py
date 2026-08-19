@@ -28,7 +28,13 @@ from metrics import SOURCE_LABELS, evaluate_dataset
 from split import assign_folds, dictionary_pool
 
 
-def cross_validate(fit_and_separate_fn, n_folds: int = 5, seed: int = 0, compute_permutation: bool = True):
+def cross_validate(
+    fit_and_separate_fn,
+    n_folds: int = 5,
+    seed: int = 0,
+    compute_permutation: bool = True,
+    mix_df: pd.DataFrame | None = None,
+):
     """
     Run leakage-safe k-fold cross-validation.
 
@@ -38,6 +44,12 @@ def cross_validate(fit_and_separate_fn, n_folds: int = 5, seed: int = 0, compute
         every recording that appears in the held-out fold's mixtures already
         removed). Must return separate_fn(mixed, sr) -> (heart_est, lung_est).
 
+    mix_df: optional pre-filtered Mix.csv rows (load_dataset.load_mix() format,
+        without fold columns -- those are computed here) to restrict
+        evaluation to, e.g. load_dataset.verify_additive_triplets()'s valid
+        subset. Folds are then assigned within that subset only. Defaults to
+        the full Mix.csv.
+
     Returns:
         results_df: one row per (fold, Mixed Sound ID, source) -> sdr/sir/sar
                      plus the row's class/location labels.
@@ -46,7 +58,7 @@ def cross_validate(fit_and_separate_fn, n_folds: int = 5, seed: int = 0, compute
                      cross-validated result.
     """
     hs_df, ls_df = load_hs(), load_ls()
-    mix_df = assign_folds(n_folds=n_folds, seed=seed)
+    mix_df = assign_folds(mix_df=mix_df, n_folds=n_folds, seed=seed)
 
     fold_results = []
     for k in sorted(mix_df["fold"].unique()):
@@ -67,6 +79,23 @@ def cross_validate(fit_and_separate_fn, n_folds: int = 5, seed: int = 0, compute
 def aggregate_by_fold(results_df: pd.DataFrame) -> pd.DataFrame:
     """Mean sdr/sir/sar per (fold, source)."""
     return results_df.groupby(["fold", "source"])[["sdr", "sir", "sar"]].mean().reset_index()
+
+
+def summarize_pooled(results_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Mean and median sdr/sir/sar per source, pooled directly over every row
+    in results_df (i.e. every evaluated mixture individually), not averaged
+    within folds first like aggregate_by_fold/aggregate_across_folds does.
+
+    Distinct from cv_summary's across-fold dispersion: per
+    TEEP2026_Sprint0_Review, averaging within folds before taking std understates
+    the true row-to-row spread (e.g. an observed 6.46+/-3.71 dB across-fold
+    figure vs. 6.30+/-39.38 dB pooled across rows for the same data) -- the
+    two are not interchangeable, and a report should say which one it means.
+    This function's numbers are the row-level ones; cv_summary's are the
+    fold-level ones.
+    """
+    return results_df.groupby("source")[["sdr", "sir", "sar"]].agg(["mean", "median", "std"])
 
 
 def aggregate_across_folds(fold_summary: pd.DataFrame) -> pd.DataFrame:

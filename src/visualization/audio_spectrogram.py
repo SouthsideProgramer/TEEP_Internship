@@ -18,6 +18,7 @@ doi: 10.1109/IEEEDATA.2025.3566012.
 © 2024 by Yasaman Torabi. All rights reserved.
 """
 
+import sys
 from pathlib import Path
 
 import librosa
@@ -26,7 +27,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "HLS-CMDS" / "Examples"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+from load_dataset import load_hs, load_ls
+
+
+def _example_rows():
+    """
+    Three illustrative recordings pulled straight from the live dataset
+    (two heart conditions + one lung condition) instead of a fixed
+    Examples/ folder, which the dataset no longer ships.
+    """
+    hs_df, ls_df = load_hs(), load_ls()
+    heart_af = hs_df[hs_df["Heart Sound Type"] == "Atrial Fibrillation"].iloc[0]
+    heart_s3 = hs_df[hs_df["Heart Sound Type"] == "S3"].iloc[0]
+    lung_wheeze = ls_df[ls_df["Lung Sound Type"] == "Wheezing"].iloc[0]
+    return [
+        (heart_af["audio_path"], "Atrial Fibrillation"),
+        (heart_s3["audio_path"], "S3"),
+        (lung_wheeze["audio_path"], "Wheezing"),
+    ]
 
 
 def plot_mel_spectrograms(audio_files):
@@ -71,11 +90,5 @@ def plot_mel_spectrograms(audio_files):
 
 
 if __name__ == "__main__":
-    # Define audio file paths and titles
-    audio_files = [
-        (str(EXAMPLES_DIR / 'M_AF_LC.wav'), 'M_AF_LC'),
-        (str(EXAMPLES_DIR / 'M_S3_C_RUSB.wav'), 'M_S3_C_RUSB'),
-        (str(EXAMPLES_DIR / 'M_W_RLA.wav'), 'M_W_RLA')
-    ]
-    plot_mel_spectrograms(audio_files)
+    plot_mel_spectrograms(_example_rows())
     plt.show()
