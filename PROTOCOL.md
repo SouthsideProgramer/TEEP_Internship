@@ -36,10 +36,10 @@ Six papers reviewed, organized by what each one actually measures:
 | HLS-CMDS descriptor (Torabi et al.) | — (source) | — | — | — | — | — |
 | AI-Driven Cardiorespiratory Signal Processing (LingoNMF / PL-NMF) [aidriven] | HLS-CMDS | PL-NMF (parallel multi-layer NMF, heart/lung-tuned) + LLM-derived fundamental frequency | not reported (paired t-test on an unspecified quality proxy) | clustering + anomaly detection, **not** accuracy | "statistically significant gains," p<0.01 | not stated |
 | Spectrotemporal Deep Learning for Heart Sound Classification [spectrotemporal] | PhysioNet 2016 | not fully characterized here (needs a primary-source read) — includes a computational-separation experiment, not raw-PCG-only as previously logged | n/a | binary normal/abnormal classification, **including on separated audio** | **Experiment 4: accuracy 89% (clean) → 41% (computationally separated) — per TEEP2026_Sprint0_Review, this is the single result this whole project exists to explain; not yet independently confirmed from the primary source here** | not stated |
-| Respiratory Disease Classification (NMF-enhanced log-mel + CRNN) [nmfcrnn] | **Conflicting**: this memo previously logged ICBHI 2017 + Fraiwan CWLS; the project charter instead has Han et al. learning dictionaries from HLS-CMDS isolated recordings (and this is the stated source of the Baseline 2 (`src/baselines.py`) hyperparameters — Kr/Ki dictionary ranks, KL-divergence MU-NMF, 100/60 iterations). **Unresolved — needs primary-source read**, per review. | NMF-based respiratory enhancement | **none** (no SNR/SDR/SI-SDR/correlation/spectral-distortion/error-energy) | multi-class respiratory disease classification | 96.14±0.50% acc, 94.05±1.21 Macro-F1; denoised-ablation Macro-F1 84.98±22.0 over 10 seeds | **recording-level**, not subject-level (authors' own flagged limitation) |
+| Respiratory Disease Classification (NMF-enhanced log-mel + CRNN) [nmfcrnn] | **Resolved from primary source (Sec. 3.2.3/4.1) — not a conflict, two datasets for two roles**: HLS-CMDS isolated heart/lung recordings are used *only* as an auxiliary corpus for offline NMF dictionary learning ("HLS-CMDS recordings were used exclusively for dictionary learning"); the actual *classification* dataset/results are ICBHI 2017 + Fraiwan CWLS, harmonized into a 7-class cohort (Asthma, Bronchiectasis, Bronchiolitis, COPD, Healthy, Pneumonia, URTI). HLS-CMDS is what feeds Baseline 2's hyperparameters. | NMF-based respiratory enhancement (Kr=20 respiratory / Ki=10 interference dictionary ranks, 100 MU dict iters, 60 MU activation iters, 4th-order Butterworth 50–1800 Hz denoise before STFT/NMF — all confirmed directly, matches `src/baselines.py` Baseline 2 exactly as of this cross-check) | **none** (no SNR/SDR/SI-SDR/correlation/spectral-distortion/error-energy) — confirmed by direct read, not just the review's summary | multi-class respiratory disease classification | 96.14±0.50% acc, 94.05±1.21 Macro-F1; denoised-ablation Macro-F1 84.98±22.0 over 10 seeds | **recording-level**, not subject-level (authors' own flagged limitation) |
 | Edge-Enabled Portable Lung-Sound Classifier (ESP32 + PYNQ-ZU) [edgelung] | **HLS-CMDS** | proposed lung isolation from mixtures | **none** — no SNR, SDR, correlation, or spectral-error figure | lung sound classification | not detailed / separation step "reports no result" | not stated |
 | Performance Measurement in Blind Audio Source Separation | — (methods paper) | — | defines SDR/SIR/SAR (BSS Eval) | n/a | n/a | n/a |
-| Cardiorespiratory Sound Separation Using SSA [ssa] | not stated in summary — **still needs confirming** (citation now known; dataset still open) | two-stage Singular Spectrum Analysis (L=50) | SDR, STOI, ground-truth correlation, vs. 5 baselines (a Butterworth bandpass baseline among them is the likely source of the 5.7 dB order-of-magnitude figure referenced in `src/baselines.py`'s review) | **none** — no classification | respiratory SDR 5.34 dB (MSSA) vs. 4.64 dB (SSA); cardiac 26.44 dB both stages; correlation 80.5%/99.2% (MSSA) vs. 10.2%/50.0% (NMF baseline) | n/a |
+| Cardiorespiratory Sound Separation Using SSA [ssa] | **Resolved from primary source (§III)**: HLS-CMDS isolated recordings (cites the same Torabi et al. descriptor paper this project uses), but *not* HLS-CMDS's own Mix.csv — the authors synthetically all-pairs-combine 10 cardiac x 5 respiratory recordings into 50 test mixtures, then add 2% RMS Gaussian noise. Not directly comparable to this project's own (real, additive) Baseline 1–3 results: the SSA paper's mixtures have an actual noise floor this project's don't, per PROTOCOL.md's own note below. | two-stage Singular Spectrum Analysis (L=50) | SDR, STOI, ground-truth correlation, vs. 5 baselines. **Confirmed from Table I directly**: the Butterworth bandpass baseline scores SDR 5.7 dB cardiac / **-5.7 dB respiratory** (i.e. negative — filtering alone fails on the respiratory side entirely), STOI 0.5/[unreported], correlation not tabulated for this row in the excerpt read. This confirms (not just "likely") the 5.7 dB figure previously guessed at in `src/baselines.py`'s review section. | **none** — no classification | respiratory SDR 5.34 dB (MSSA) vs. 4.64 dB (first-stage SSA); cardiac 26.44 dB both stages; respiratory correlation 80.5% (MSSA) vs. 77.2% (SSA) vs. 10.2% (their own NMF baseline, cardiac 50.0%) — all confirmed from Table I directly, not the review's summary | n/a |
 
 **References** (from the Notion Reading List, via TEEP2026_Sprint0_Review — not yet cross-checked against the primary sources directly in this repo):
 - `[aidriven]` Torabi, PhD thesis, McMaster, 2025.
@@ -63,14 +63,25 @@ this study's design rather than treating as background:
   separated signal that's been badly distorted, if the distortion doesn't
   cross a decision boundary — SAR is sensitive to distortion accuracy alone
   won't reveal, which is the mechanistic reason to report both.
-- **SDR is not perceptual and is gameable.** A slightly low-pass-filtered
-  estimate can drive SDR toward +inf under a time-varying filter without
-  the estimate actually sounding, or classifying, any better. SDR alone is
-  not sufficient evidence of separation quality — SIR and SAR have to be
-  reported alongside it, which is exactly what `metrics.py` already does.
-- The paper also notes that for HLS-CMDS specifically, mixtures are heart +
-  lung only with **no independent sensor-noise reference**, so the
-  BSS Eval "noise" term is effectively zero and SAR captures pure
+- **SDR is not perceptual and is gameable.** The paper is explicit that SDR
+  depends on which class of "allowed distortion" is used to project the
+  estimate before scoring (§III) — a more permissive class (e.g. the
+  time-invariant multi-tap filter `mir_eval.separation.bss_eval_sources`
+  actually allows, confirmed from `src/metrics.py`; not literally
+  "time-varying," corrected from an earlier draft of this line) can absorb
+  more of the estimate's actual distortion into the "allowed" bucket and
+  push SDR up without the estimate sounding, or classifying, any better.
+  SDR alone is not sufficient evidence of separation quality — SIR and SAR
+  have to be reported alongside it, which is exactly what `metrics.py`
+  already does.
+- **This project's own inference, not the paper's** (Vincent et al. is a
+  2006 methods paper and predates HLS-CMDS by two decades, so it cannot and
+  does not mention it by name — corrected misattribution from an earlier
+  draft of this line): the paper's four-term decomposition (§I, `e_noise`
+  representing "sensor noises" specifically, distinct from interference and
+  artifacts) implies that since HLS-CMDS mixtures are heart + lung only with
+  **no independent sensor-noise reference**, the BSS Eval "noise" term is
+  effectively zero here, and SAR captures pure
   algorithmic artifact, not real-world sensor/environmental noise. That
   bounds what this study can claim: it measures separation-then-classification
   degradation in a clean-mixture setting, not robustness to real acquisition
@@ -195,24 +206,37 @@ nets a modest gain over doing nothing at all. That gap between "better SIR"
 and "worse SAR" is the concrete demonstration of the BSS Eval paper's point
 in §2: SDR alone would have made bandpass look like a bigger win than it is.
 
-**Baseline 2 — supervised NMF, reproducing `[nmfcrnn]` (Han, Quan,
-Matuszewski & Corbett, *Sensors*, 2026, doi:10.3390/s26134268 — identified
-via TEEP2026_Sprint0_Review; not yet independently read from the primary
-source) (implemented, `src/baselines.py`).** Two fixed dictionaries, one
-per source, learned from isolated H/L recordings via KL-divergence
-multiplicative-update NMF, then frozen and used to solve for per-mixture
-activations (the classic supervised-NMF separation recipe, Smaragdis
-2007). Hyperparameters as given during this project's chat-based handoff
-(**not yet cross-checked against the paper directly — correction from an
-earlier draft of this section, which overstated that check**): Kr = lung
-dictionary rank = 20, Ki = heart dictionary rank = 10; 100 MU iterations to
-fit each dictionary, 60 MU iterations to solve activations per mixture with
-the dictionaries frozen. Separation is a soft (Wiener-style) mask on the
-mixture's complex STFT built from the two sources' reconstructed
-magnitudes. Note the still-open dataset discrepancy in the `[nmfcrnn]` row
-of §2's table (ICBHI+Fraiwan vs. HLS-CMDS isolated recordings) — worth
-resolving since it bears on whether "isolated H/L recordings" here means
-this project's own HS.csv/LS.csv or a different corpus entirely.
+**Baseline 2 — supervised NMF, adapting `[nmfcrnn]` (Han, Quan,
+Matuszewski & Corbett, *Sensors*, 2026, doi:10.3390/s26134268; now
+**cross-checked directly against `papers/Respiratory_Disease_Classification_..._pdf`,
+Sec. 3.2.1–3.2.4** — the earlier hedge here is resolved) (implemented,
+`src/baselines.py`).** Two fixed dictionaries, one per source, learned from
+isolated H/L recordings via KL-divergence multiplicative-update NMF, then
+frozen and used to solve for per-mixture activations (the classic
+supervised-NMF separation recipe, Smaragdis 2007). Hyperparameters, all
+confirmed against the paper's text (previously given only during a
+chat-based handoff, unverified): Kr = respiratory (lung) dictionary rank =
+20, Ki = interference (heart) dictionary rank = 10; 100 MU iterations to
+fit each dictionary, 60 MU iterations to solve per-mixture activations with
+the dictionaries frozen, H initialized non-negative and lower-bounded at
+1e-3 (Sec. 3.2.4); STFT via a 512-sample window / 256-sample hop / 512-point
+FFT (Sec. 3.2.3 — this project's prior 128-sample hop was unverified and has
+been corrected to 256). **One real gap found and fixed**: the paper denoises
+every snippet — both dictionary-training recordings and the mixture being
+separated — with a 4th-order Butterworth bandpass (50–1800 Hz) *before*
+STFT/NMF (Sec. 3.2.1), to strip baseline drift and acquisition noise; this
+project's initial reproduction skipped that stage entirely. Now added
+(`DENOISE_BAND` in `src/baselines.py`), applied identically to Baseline 3
+(§ below) so the two stay a controlled ablation of each other. Separation
+extends the paper's own single-sided respiratory-only reconstruction to a
+symmetric two-source mask (the paper never reconstructs or evaluates the
+heart/interference side at all — see `src/baselines.py`'s docstring for the
+full adaptation note). The `[nmfcrnn]` dataset discrepancy flagged in §2's
+table is now resolved, also from the primary source: HLS-CMDS isolated
+recordings are the auxiliary dictionary-learning corpus (exactly this
+project's own HS.csv/LS.csv), while ICBHI 2017 + Fraiwan CWLS is the
+paper's separate classification dataset — not a conflict, two datasets for
+two roles in the same paper.
 
 **Leakage trap.** A third of HS.csv/LS.csv's recordings are byte-identical
 to a heart/lung component of some Mix.csv row — that row's own ground
@@ -224,32 +248,156 @@ pool, same triplet-level split as Baseline 1 — so the number below is
 lower than a naive reproduction would report. That lower number is the
 correct one; a higher one would mean leakage, not a better model.
 
-5-fold result (`python src/baselines.py`):
+5-fold result, post-denoising-fix (`python src/baselines.py`):
 
-| source | SDR (dB) | SIR (dB) | SAR (dB) |
-|---|---|---|---|
-| heart | -12.82 ± 1.31 | 4.22 ± 1.63 | -9.58 ± 0.90 |
-| lung  | -15.09 ± 0.98 | 0.32 ± 0.58 | -9.23 ± 1.42 |
+| subset | source | SDR (dB) | SIR (dB) | SAR (dB) |
+|---|---|---|---|---|
+| Full 145 rows | heart | -12.95 ± 1.34 | 4.82 ± 1.65 | -10.27 ± 0.89 |
+| Full 145 rows | lung  | -15.09 ± 1.10 | 0.58 ± 0.33 | -10.11 ± 1.46 |
+| Additive-only 36 rows | heart | 2.69 ± 2.96 | 7.42 ± 3.99 | 7.61 ± 0.87 |
+| Additive-only 36 rows | lung  | 0.62 ± 3.14 | 2.25 ± 3.55 | 9.93 ± 0.91 |
 
-Compare against Baseline 1 (bandpass): heart SDR -12.65±1.40 / SIR
-4.07±1.16 / SAR -8.10±1.44; lung SDR -13.83±1.12 / SIR 1.73±0.29 / SAR
--9.27±1.42. Leakage-safe supervised NMF comes in **essentially tied with
-the trivial bandpass filter on heart** (SDR delta well within one fold-std
-of either) and **~1.3 dB worse on lung** — not the clear win over a
-zero-training baseline a paper's reported numbers would suggest. This
+On the full 145-row set, essentially unchanged from the pre-fix numbers
+(heart was -12.82±1.31, lung -15.09±0.98) — the denoising step and corrected
+hop size turn out **not** to be why this baseline underperforms; see below.
+Compare against Baseline 1 (bandpass) on the same full set: heart SDR
+-12.65±1.40 / SIR 4.07±1.16 / SAR -8.10±1.44; lung SDR -13.83±1.12 / SIR
+1.73±0.29 / SAR -9.27±1.42. Leakage-safe supervised NMF comes in
+**essentially tied with the trivial bandpass filter on heart** (SDR delta
+well within one fold-std of either) and **~1.3 dB worse on lung** — not the
+clear win over a zero-training baseline a paper's reported numbers would
+suggest, though note `[nmfcrnn]` itself never reports a separation-quality
+number at all (only downstream classification accuracy on its own,
+different dataset), so there is no paper SDR/SNR figure to be "behind." This
 tracks with a sanity check run against a single mixture row using an
 *oracle* mask built from that row's own true heart/lung spectrograms
 (cheating on purpose, just to bound the method): even the oracle mask only
 modestly beat the no-separation reference on that row, so the ceiling for
 mask-based separation on this dataset's real (not synthetically summed)
 mixture recordings looks lower than the bandpass-vs-no-separation
-comparison alone would suggest — worth keeping in mind before trusting any
-future method's reported gain at face value.
+comparison alone would suggest.
 
-**Still open:** SSA (best-reported respiratory SDR among the papers
-reviewed, 5.34 dB) or PL-NMF/LingoNMF if reproducible from the AI-Driven
-paper's description, as a third separation method to compare against
-both baselines.
+On the additive-only 36-row subset the picture changes substantially: both
+sources swing to positive SDR (heart +2.69, lung +0.62 dB) — most of the
+full-set's negative SDR is attributable to the 109 rows whose "mixed" file
+isn't actually related to its named heart/lung sources (§0/`README.md`'s
+Dataset section), not to a separation-method failure. This is the first
+result this project has on the valid-only subset for Baseline 2 (previously
+only Baseline 1/3 had been re-run there) — see Baseline 3 immediately below
+for the apples-to-apples ablation this unlocks.
+
+**Baseline 3 — standard NMF, no learned dictionary (ablation against
+Baseline 2; ref S3-03, `src/baselines.py`, `make_standard_nmf_baseline`).**
+Same total rank (Ki+Kr=30), STFT params, and denoising pre-filter as
+Baseline 2, but W and H are both factorized directly out of each held-out
+mixture's own spectrogram — no dictionary-learning phase, so
+`hs_allowed`/`ls_allowed` go unused. Components are unlabeled by
+construction; assigned to heart/lung post-hoc by spectral centroid (heart
+energy concentrated below ~200 Hz, per Baseline 1's own PSD survey).
+
+5-fold result, post-denoising-fix:
+
+| subset | source | SDR (dB) | SIR (dB) | SAR (dB) |
+|---|---|---|---|---|
+| Full 145 rows | heart | -13.07 ± 1.38 | 4.65 ± 1.08 | -10.08 ± 1.35 |
+| Full 145 rows | lung  | -14.41 ± 1.23 | 1.42 ± 0.23 | -10.00 ± 1.47 |
+| Additive-only 36 rows | heart | 3.44 ± 2.02 | 7.10 ± 3.23 | 9.38 ± 0.55 |
+| Additive-only 36 rows | lung  | 2.22 ± 3.91 | 4.89 ± 4.78 | 9.64 ± 0.96 |
+
+**This is now a genuine apples-to-apples ablation**, both baselines sharing
+denoising/STFT/mask code and differing only in whether the dictionary is
+pretrained (Baseline 2) or factorized fresh per mixture (Baseline 3). On the
+additive-only subset, Baseline 3 (no learned dictionary) is **as good as or
+slightly better than** Baseline 2 (learned dictionary) on both sources
+(heart +3.44 vs. +2.69 dB; lung +2.22 vs. +0.62 dB) — i.e. on this dataset,
+`[nmfcrnn]`'s pretrained-dictionary strategy is not earning its keep over
+blind per-mixture NMF once leakage and the non-additive rows are both
+controlled for. Worth treating as provisional (n=36 additive rows, wide
+per-row spread — see the pooled std note in §8) rather than a settled
+result, but it's a real, reproducible finding, not a sanity-check artifact.
+
+**Baseline 4 — multi-stage SSA (MSSA), reproducing `[ssa]` (Han & Quan,
+*2025 ICSPS*, doi:10.1109/ICSPS66615.2025.11347745; cross-checked directly
+against `papers/Cardiorespiratory_Sound_Separation_Using_Singular_Spectrum_
+Analysis.pdf`, Sec. II) (implemented, `src/baselines.py`,
+`fit_ssa_baseline`/`mssa_separate`).** Zero-training, two-stage decomposition
+applied identically to every mixture — no dictionary or fold-fitting step,
+so `hs_allowed`/`ls_allowed` go unused and there is no leakage trap to speak
+of (nothing is fit on any recording). All four hyperparameters are stated
+explicitly in the paper and used as-is: window length L=50 (Sec. II.A), a
+250 Hz cardiac/respiratory frequency split (Sec. II.B, based on the S1/S2
+heart-sound range), a 2% eigenvalue-contribution threshold for stage-2
+"high-energy" respiratory RCs (Sec. II.B, `100/L` for L=50), and a 50%
+cross-correlation threshold for including additional stage-2 RCs (Sec.
+II.B). **Confirmed**: the 250 Hz split is a physiological frequency in
+absolute Hz, not normalized to the paper's own sample rate, so it sits
+correctly relative to this project's 4000 Hz sample rate (2000 Hz Nyquist,
+8x above the split) with no rescaling needed; the paper's own dataset is the
+same Torabi et al. HLS-CMDS descriptor source this project cites (their ref
+[19]), so there's no cross-dataset sample-rate mismatch to resolve either —
+this was the specific item flagged for confirmation when Baseline 4 was
+scoped.
+
+Stage 1 (cardiac) SSA-decomposes the raw mixture into 50 reconstructed
+components (RCs) via trajectory-matrix embedding + SVD + diagonal averaging;
+each RC's Welch-PSD peak frequency sorts it into the final heart_est
+(≤250 Hz) or a residual pool (>250 Hz) that stage 2 further decomposes.
+Stage 2 (respiratory) selects RCs whose relative eigenvalue contribution
+clears the 2% threshold, then adds any remaining RC whose Pearson
+correlation with that selected set's sum exceeds 50% — an interpretation
+choice, since the paper doesn't fully spell out what "the remaining modes"
+are correlated against; flagged in `src/baselines.py`'s docstring as this
+project's own reading, same as Baseline 2's two-sided-mask extension is
+flagged.
+
+**Synthetic-set comparison against Table I** (the paper's own evaluation
+isn't run on HLS_CMDS's Mix.csv — see the `[ssa]` row in §2 — so this is the
+only like-for-like comparison available; `build_synthetic_mixes()`
+reproduces the paper's recipe from this project's own HS.csv/LS.csv: 10
+heart x 5 lung recordings, all 50 combinatorial pairs, +2% RMS Gaussian
+noise):
+
+| | Paper's MSSA (Table I) | This reproduction |
+|---|---|---|
+| Cardiac SDR | 26.4 dB | 1.24 dB |
+| Cardiac correlation | 99.2% | 64.8% |
+| Respiratory SDR | 5.3 dB | 6.81 dB |
+| Respiratory correlation | 80.5% | 44.4% |
+
+Respiratory SDR is actually in the paper's range (slightly better);
+everything else — cardiac SDR/correlation and respiratory correlation — is
+substantially below the paper's own numbers. This is a larger, more
+asymmetric gap than Baseline 2's turned out to be (which resolved to "harder
+real-dataset setup," not a bug, once measured on the right subset) — **not
+yet resolved**, flagged in §8 as an open item rather than assumed to be
+either an implementation bug or an inherent reproduction gap.
+
+5-fold result on this project's own real mixtures (via `eval_harness`, for
+consistency with Baselines 1–3's reporting; not paper-comparable per the
+`[ssa]` row in §2's synthetic-vs-real-mixture note):
+
+| subset | source | SDR (dB) | SIR (dB) | SAR (dB) |
+|---|---|---|---|---|
+| Full 145 rows | heart | -12.80 ± 1.52 | 4.03 ± 1.18 | -7.80 ± 1.58 |
+| Full 145 rows | lung  | -13.56 ± 1.26 | 2.61 ± 0.71 | -9.53 ± 1.38 |
+| Additive-only 36 rows | heart | 5.17 ± 4.05 | 5.88 ± 3.97 | 18.97 ± 3.56 |
+| Additive-only 36 rows | lung  | 5.32 ± 3.20 | 8.53 ± 4.55 | 12.04 ± 2.89 |
+
+In the same ballpark as Baselines 1–3 on the full 145-row set. On the
+additive-only 36-row subset, Baseline 4 is the **best of all four baselines
+so far** on both sources (heart +5.17 dB vs. Baseline 3's +3.44 dB;
+lung +5.32 dB vs. Baseline 3's +2.22 dB) — notably also with much higher SAR
+(19.0/12.0 dB vs. Baselines 2/3's single-digit SAR), consistent with SSA's
+own claim of preserving signal integrity better than filtering/NMF-based
+masking. This real-mixture result is the opposite direction from the
+synthetic-set comparison above (where Baseline 4's cardiac side badly
+underperforms the paper's own number) — worth noting as a further reason to
+treat the synthetic-set gap as a specific, unresolved discrepancy rather
+than evidence Baseline 4 is broken generally.
+
+**Still open:** PL-NMF/LingoNMF if reproducible from the AI-Driven paper's
+description, as a fourth separation method; resolving Baseline 4's
+cardiac-side synthetic-set gap (see §8).
 
 ### 5.3 Classification (new — not yet built)
 
@@ -373,19 +521,77 @@ predict misclassification even when aggregate accuracy looks fine?
   dataset discrepancy itself (ICBHI+Fraiwan vs. HLS-CMDS isolated
   recordings) remains open, see below.
 
+**Done in the papers/ cross-check session (2026-08-20):** primary-source
+PDFs landed in `papers/`, enabling direct verification instead of relying on
+TEEP2026_Sprint0_Review's summary:
+- **`[nmfcrnn]` dataset discrepancy resolved** (§2 table, §5.2) — HLS-CMDS is
+  the auxiliary NMF dictionary-learning corpus (matches this project's own
+  HS.csv/LS.csv exactly); ICBHI 2017 + Fraiwan CWLS is the paper's separate
+  classification dataset. Not a conflict.
+- **`[nmfcrnn]` hyperparameters and pipeline order fully cross-checked**
+  (§5.2) — Kr=20/Ki=10, 100/60 MU iterations, and H's 1e-3 init floor all
+  confirmed exact matches; STFT hop corrected from an unverified 128 to the
+  paper's actual 256; a missing pre-NMF waveform-denoising stage (4th-order
+  Butterworth 50–1800 Hz) found and added to `src/baselines.py`, applied
+  identically to Baseline 3 for a controlled ablation.
+- **`[ssa]` dataset resolved** (§2 table) — HLS-CMDS isolated recordings,
+  synthetically all-pairs-combined (10 cardiac x 5 respiratory = 50 test
+  mixtures) plus 2% RMS Gaussian noise; *not* HLS-CMDS's own Mix.csv, so its
+  SDR numbers aren't directly comparable to this project's Baseline 1–3
+  results on real mixtures.
+- **`[ssa]`'s Table I confirmed directly** (§2 table) — the "likely" 5.7 dB
+  Butterworth-baseline guess in an earlier `src/baselines.py` comment is
+  confirmed exactly: 5.7 dB cardiac, **-5.7 dB respiratory** (negative).
+- **BSS Eval paper's SDR-gameability claim corrected** (§2) — the actual
+  mechanism is allowed-distortion-class permissiveness (§III of the paper),
+  not literally "time-varying filter"; a separate misattributed claim ("the
+  paper notes... for HLS-CMDS specifically") is corrected — the 2006 paper
+  predates HLS-CMDS and never mentions it; that inference is this project's
+  own, applied from the paper's general noise/interference/artifact
+  decomposition.
+- Baseline 2 and 3 re-run post-fix on both the full 145 rows and the
+  additive-only 36-row subset (§5.2) — first time Baseline 2 has numbers on
+  the valid subset, making the ablation against Baseline 3 apples-to-apples
+  for the first time. Result: Baseline 3 (no learned dictionary) matches or
+  slightly beats Baseline 2 (learned dictionary) there — the pretrained
+  dictionary isn't earning its keep on this dataset, a genuine finding, not
+  a bug.
+
+**Done in the Baseline 4 / MSSA session (2026-08-20, continued):**
+- Baseline 4 implemented and cross-checked directly against `[ssa]`'s primary
+  source (§5.2): multi-stage SSA, all four hyperparameters (L=50, 250 Hz
+  split, 2%/50% thresholds) confirmed exact matches to the paper's §II. The
+  250 Hz cardiac/respiratory split confirmed to sit correctly at this
+  project's 4000 Hz sample rate (physiological Hz value, well under the
+  2000 Hz Nyquist, no rescaling needed) — the item explicitly flagged for
+  confirmation when this baseline was scoped.
+- **New open item, not resolved**: Baseline 4's synthetic-set reproduction
+  (§5.2) falls far short of the paper's own reported cardiac SDR/correlation
+  (1.24 dB/64.8% vs. 26.4 dB/99.2%), while landing in the right range on
+  respiratory SDR (6.81 vs. 5.3 dB) — an asymmetric gap. Candidate
+  explanation not yet confirmed: Stage 1's literal per-RC peak-frequency
+  threshold (this implementation's reading of "components with dominant
+  frequencies below or equal to 250 Hz are classified as cardiac-related")
+  may be more permissive than the paper's own "periodic structure analysis"
+  phrasing implies, letting low-energy/noise-like RCs into the cardiac sum
+  on both sides of the split. Needs further digging before trusting Baseline
+  4's numbers as a faithful reproduction rather than a partial one.
+
 **Still open:**
-- Resolve the `[nmfcrnn]` dataset discrepancy (§2 table) — bears on what
-  "isolated H/L recordings" means for Baseline 2's own reproduction.
-- Confirm the SSA paper's (`[ssa]`) dataset — citation now known, dataset
-  still not stated in the summary reviewed.
 - **Statistics**: this memo's and `report/report.pdf`'s across-fold
   mean±std (e.g. Table 5's ±3.71 dB) understates pooled-row spread by an
   order of magnitude (pooled heart SAR is 6.30±39.38 dB, not 6.46±3.71) —
   report medians and/or bootstrap CIs alongside means once re-issued, and
   always state which level (per-row vs. per-fold) the dispersion is
   computed at.
-- Independently re-read Yaqub et al. and `[nmfcrnn]` from the primary
-  sources rather than relying on the review's summary of the Reading List.
+- Independently re-read Yaqub et al. (`[spectrotemporal]`) from the primary
+  source rather than relying on the review's summary of the Reading List —
+  `[nmfcrnn]` and `[ssa]` are now done (see above), Yaqub is not.
+- Resolve Baseline 4's cardiac-side reproduction gap (see above) — either by
+  refining Stage 1's RC classification criterion or by confirming the paper
+  is genuinely silent on this and the gap is inherent to the ambiguity.
+- PL-NMF/LingoNMF (`[aidriven]`) remains the one separation method from §2's
+  table not yet reproduced as a baseline.
 - Decide classifier architecture and training protocol for 5.3, now scoped
   to a continuous separation-quality sweep (§4) rather than two fixed
   conditions.

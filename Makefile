@@ -12,7 +12,7 @@ SRC        := src
 TORCH_INDEX := https://download.pytorch.org/whl/cu121
 
 .PHONY: help all venv install test validate split eval-harness baselines \
-        baseline1 baseline2 stats plots clean clean-pyc clean-all
+        baseline1 baseline2 baseline3 baseline4 stats plots clean clean-pyc clean-all
 
 .DEFAULT_GOAL := help
 
@@ -30,9 +30,12 @@ help:
 	@echo "  make eval-harness  run the no-op baseline through the full k-fold harness (plumbing smoke test)"
 	@echo ""
 	@echo "Separation baselines (src/baselines.py):"
-	@echo "  make baselines     Baseline 1 + 2, each on full 145 rows AND the additive-only subset, ~15 min"
+	@echo "  make baselines     Baseline 1 + 2 + 3 + 4, each on full 145 rows AND the additive-only subset,"
+	@echo "                     plus Baseline 1/4 on the SSA-paper-style synthetic set, ~20 min"
 	@echo "  make baseline1     Baseline 1 only (bandpass filter, fast)"
 	@echo "  make baseline2     Baseline 2 only (supervised NMF, slow — dictionary fitting per fold)"
+	@echo "  make baseline3     Baseline 3 only (standard NMF, no learned dictionary — ablation vs. baseline2)"
+	@echo "  make baseline4     Baseline 4 only (multi-stage SSA, reproducing Han & Quan ICSPS 2025)"
 	@echo ""
 	@echo "Reports:"
 	@echo "  make stats         per-class/per-location duration, sample rate, clipping stats"
@@ -79,6 +82,16 @@ print(fold_summary.to_string(index=False)); print(); print(cv_summary.to_string(
 baseline2:
 	cd $(SRC) && ../$(PYTHON) -c "from eval_harness import cross_validate; from baselines import make_supervised_nmf_baseline; \
 results_df, fold_summary, cv_summary = cross_validate(make_supervised_nmf_baseline(seed=0), n_folds=5, seed=0); \
+print(fold_summary.to_string(index=False)); print(); print(cv_summary.to_string())"
+
+baseline3:
+	cd $(SRC) && ../$(PYTHON) -c "from eval_harness import cross_validate; from baselines import make_standard_nmf_baseline; \
+results_df, fold_summary, cv_summary = cross_validate(make_standard_nmf_baseline(seed=0), n_folds=5, seed=0); \
+print(fold_summary.to_string(index=False)); print(); print(cv_summary.to_string())"
+
+baseline4:
+	cd $(SRC) && ../$(PYTHON) -c "from eval_harness import cross_validate; from baselines import fit_ssa_baseline; \
+results_df, fold_summary, cv_summary = cross_validate(fit_ssa_baseline, n_folds=5, seed=0); \
 print(fold_summary.to_string(index=False)); print(); print(cv_summary.to_string())"
 
 stats:

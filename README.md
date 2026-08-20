@@ -91,3 +91,48 @@ python3 visualization/plot_per_class.py    # waveform + spectrogram grid, one re
 
 python3 statistics/audio_quality.py        # per-class/per-location duration, sample rate, clipping stats
 ```
+# Knowledge Base — Heart & Lung Sound Analysis
+
+Reference papers for the heart/lung sound classification project.
+Synced manually from Claude Project knowledge (no automatic sync — see Updating).
+
+## Contents
+
+| File | Topic | Used for |
+|---|---|---|
+| `papers/HLSCMDS_Dataset_Descriptor.pdf` | Heart and lung sounds dataset recorded from a clinical manikin with a digital stethoscope | Dataset structure, sampling rate, label schema |
+| `papers/Cardiorespiratory_Separation_SSA.pdf` | Separating heart sounds from lung sounds via Singular Spectrum Analysis | Preprocessing / source separation stage |
+| `papers/BSS_Eval_Performance_Metrics.pdf` | Definitions of SDR, SIR, SAR for blind source separation | Evaluation metrics for the separation stage |
+| `papers/Respiratory_Disease_Classification_NMF_LogMel_CRNN.pdf` | NMF-enhanced log-Mel spectrograms feeding a CRNN | Model architecture & feature pipeline |
+| `papers/Spectrotemporal_Heart_Sound_Clinical_Noise.pdf` | Spectro-temporal deep learning for heart sounds under clinical noise | Noise robustness |
+| `papers/Edge_Portable_Lung_Sound_CNN.pdf` | CNN lung sound classifier running on edge hardware | Deployment, model size constraints |
+
+## Where this goes in the repo
+
+```
+your-project/
+│   ├── README.md
+│   └── papers/*.pdf
+├── src/
+└── CLAUDE.md
+```
+```markdown
+## Reference material
+Foundational papers live in `knowledge-base/papers/`.
+See `knowledge-base/README.md` for which paper maps to which part of the pipeline.
+When you need specifics on feature extraction, evaluation metrics, or model
+architecture, read the relevant file instead of inferring.
+```
+
+## A note on Git
+
+These are binary PDFs totalling ~18MB. To keep the repo light:
+
+- Use Git LFS: `git lfs track "knowledge-base/papers/*.pdf"`
+- Or add `knowledge-base/papers/` to `.gitignore` and commit only this README
+  alongside links to each paper's original source.
+
+## Updating
+
+Claude Project knowledge does not sync back and forth with your repo. When you add
+new documents to the Project, download them here manually and update the table above.
