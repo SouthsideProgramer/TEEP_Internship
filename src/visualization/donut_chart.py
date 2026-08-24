@@ -1,12 +1,8 @@
 """
 Sound Types Donut Chart Visualization
 
-This Python script generates a multi-layered donut chart to visualize the number of different heart, lung, and mixed sounds in a dataset. It uses the `matplotlib` library to create concentric donut layers representing heart sounds, lung sounds, and mixed sounds. The chart includes a legend showing the total counts for each sound type.
-
-## Features:
-- Three concentric donut charts: inner (lung sounds), middle (heart sounds), outer (mixed sounds).
-- Consistent color mapping across all layers for each sound type.
-- Displays the count for each sound type within the chart.
+Generates a multi-layered donut chart of heart/lung/mixed sound counts
+using `matplotlib`. See code_description.md for the feature list.
 
 ## Citation:
 If you use this code or the associated dataset in your research, please cite the following paper:
@@ -18,8 +14,13 @@ doi: 10.1109/IEEEDATA.2025.3566012.
 © 2024 by Yasaman Torabi. All rights reserved.
 """
 
+import sys
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for report_utils
 
 
 def plot_sound_type_donut_chart():
@@ -106,5 +107,25 @@ def plot_sound_type_donut_chart():
 
 
 if __name__ == "__main__":
-    plot_sound_type_donut_chart()
-    plt.show()
+    from report_utils import image_figure, report_shell, results_dir, section, write_report
+
+    print("Building sound-type donut chart...")
+    plots_dir = results_dir() / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    output_path = plots_dir / "donut_chart.png"
+
+    fig = plot_sound_type_donut_chart()
+    fig.savefig(output_path, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    html = report_shell(
+        title="Sound Types Donut Chart",
+        eyebrow="HLS-CMDS · donut_chart.py",
+        heading="Heart / lung / mixed sound type counts",
+        dek="Three-layer donut chart of sound-type counts across the dataset (mixed outer, heart middle, lung inner).",
+        stat_tiles="",
+        body=section("Donut chart", "heart / lung / mixed", image_figure(f"plots/{output_path.name}", "sound type donut chart")),
+        footer="<p><strong>Method.</strong> See <code>donut_chart.py</code>'s <code>plot_sound_type_donut_chart()</code>.</p>",
+    )
+    report_path = write_report(results_dir() / "donut_chart_report.html", html)
+    print(f"Report written to {report_path}")

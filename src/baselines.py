@@ -2,158 +2,27 @@
 Baseline separation methods for the heart/lung mix set -- the "does the real
 method even beat a filter" sanity floor referenced in PROTOCOL.md 5.2/8.
 
-Baseline 1: simple bandpass filtering. Zero-training, non-adaptive: a fixed
-Butterworth bandpass per source, applied identically to every mixture. Any
-learned method (NMF, SSA, ...) should comfortably beat this; if it doesn't,
-that's a sign of a bug, not a hard separation problem.
-
-Cutoffs were chosen from the average Welch PSD of HS.csv/LS.csv's isolated
-recordings (not just literature defaults): heart energy dominates below
-~150-200 Hz, lung takes over from ~200 Hz up to ~700-800 Hz, and both fall
-into the noise floor above ~1 kHz at this dataset's 4000 Hz sample rate. The
-heart/lung bands below therefore overlap on purpose in the 150-200 Hz
-region -- that overlap is real (both sources have genuine energy there) and
-is exactly the "spectral overlap" failure mode this baseline is meant to
-demonstrate, not an implementation bug.
-
-Baseline 2: supervised NMF, adapting Han, Quan, Matuszewski & Corbett,
-"Respiratory Disease Classification Using NMF-Enhanced Log-Mel Spectrograms
-and Convolutional Recurrent Neural Networks," Sensors 2026, 26(13):4268,
-doi:10.3390/s26134268 (papers/Respiratory_Disease_Classification_...pdf --
-now actually cross-checked against the primary source, Sec. 3.2.3/3.2.4,
-resolving PROTOCOL.md 5.2's earlier hedge). Two fixed dictionaries -- one per
-source -- are learned from isolated H/L recordings via KL-divergence
-multiplicative-update NMF, then frozen and used to solve for per-mixture
-activations, per the classic supervised-NMF separation recipe (Smaragdis
-2007). Paper notation, confirmed: Kr = respiratory (lung) dictionary rank =
-20, Ki = interference (heart) dictionary rank = 10; 100 MU iterations to fit
-each dictionary, 60 MU iterations to solve activations against a held-out
-mixture with the dictionaries frozen. The paper's own auxiliary dictionary
-corpus *is* HLS-CMDS's isolated heart/lung recordings (Sec. 3.2.3: "HLS-CMDS
-recordings were used exclusively for dictionary learning") -- this also
-resolves PROTOCOL.md 2's "conflicting" `[nmfcrnn]` dataset row: HLS-CMDS is
-the auxiliary dictionary source, while ICBHI 2017 + Fraiwan CWLS (Sec. 4.1)
-is the *classification* dataset the paper's accuracy numbers are reported
-on. Not a conflict -- two different datasets for two different roles in the
-same paper.
-
-ADAPTATION, not literal reproduction: the paper's own pipeline is
-single-sided -- it only ever reconstructs the *respiratory* (lung) signal
-via M_r = V-hat_r / (V-hat_r + V-hat_i) and discards the interference
-(heart) component entirely (Sec. 3.2.4); it never reports a separated heart
-signal or any separation-quality metric (SDR/SNR/etc.) for either source,
-only downstream classification accuracy/Macro-F1 on the enhanced respiratory
-output. This project needs both sources back out (its own research question
-is heart+lung separation quality, not respiratory-only enhancement for
-classification), so this implementation extends the paper's mask to a
-symmetric two-source split: mask_heart = heart_mag / (heart_mag +
-lung_mag), mask_lung = 1 - mask_heart. The dictionary-learning and
-activation-solving math is faithful to the paper; the two-sided
-reconstruction is this project's own extension of it.
-
-PIPELINE ORDER (Sec. 3.2.1, initially missed): the paper denoises every
-snippet -- both the isolated dictionary-training recordings and the mixture
-being separated -- with a 4th-order Butterworth bandpass (50-1800 Hz) *before*
-STFT/NMF, to strip baseline drift and high-frequency acquisition noise.
-That's a single broadband pre-filter shared by both sources, distinct in
-purpose from Baseline 1's per-source 20-200/150-1000 Hz bands (which *are*
-the separation, not a pre-filter for one). Added here (`DENOISE_BAND`,
-applied in `_fit_dictionary` and both `separate()` closures below) to match
-the paper's actual pipeline order, not just its NMF math -- the initial
-reproduction skipped this stage entirely.
-
-LEAKAGE TRAP (see PROTOCOL.md 5.1/split.py): a third of HS.csv/LS.csv's
-recordings are byte-identical to a heart/lung component of some Mix.csv
-row -- the row's own ground truth. A naive reproduction that fits the
-dictionaries on "all of HS.csv/LS.csv" therefore lets a mixture's own
-ground-truth source into its separation dictionary. This implementation
-only ever sees `hs_allowed`/`ls_allowed` -- eval_harness.cross_validate's
-fold-safe pool, with every recording that appears in the held-out fold's
-mixtures already excluded (same triplet-level split as S2-03) -- so its
-score is expected to come in lower than a naive reproduction's. That lower
-number is the correct one; a higher one would mean leakage, not a better
-model.
-
-Baseline 3: standard NMF, no learned dictionary (ablation against Baseline 2 /
-S3-02; ref S3-03). Same total rank (Ki+Kr=30), STFT params, and DENOISE_BAND
-pre-filter as Baseline 2, but W and H are both factorized directly out of
-each held-out mixture's own (denoised) spectrogram -- no dictionary-learning
-phase from isolated recordings, so hs_allowed/ls_allowed go unused, same as
-Baseline 1. Keeping the denoising step identical to Baseline 2 matters here:
-the point of this ablation is to isolate the effect of the *learned
-dictionary* specifically, so every other stage of the pipeline (denoise,
-STFT params, mask/reconstruction recipe) is held fixed between the two.
-This isolates how much
-of Baseline 2's score comes from the learned/frozen dictionary versus NMF
-factorization alone. The resulting components are unlabeled by construction;
-they're assigned to heart/lung post-hoc by spectral centroid (heart energy
-concentrated below ~200 Hz, per Baseline 1's own PSD survey) -- a fixed
-physical prior, not a source label, so the method stays genuinely blind.
-
-Baseline 4: multi-stage Singular Spectrum Analysis (MSSA), reproducing Han &
-Quan, "Cardiorespiratory Sound Separation Using Singular Spectrum Analysis,"
-2025 17th IEEE Int'l Conf. on Signal Processing Systems (ICSPS), doi:
-10.1109/ICSPS66615.2025.11347745 (`papers/Cardiorespiratory_Sound_Separation_
-Using_Singular_Spectrum_Analysis.pdf`). Zero-training like Baseline 1 --
-`hs_allowed`/`ls_allowed` go unused, no leakage trap applies (there is no
-fitting step at all). All four hyperparameters are stated explicitly in the
-paper and used here as-is:
-
-- `SSA_WINDOW_LENGTH = 50` (Sec. II.A: "a window length of 50 was selected
-  to achieve a balance between processing speed and signal separability").
-- `SSA_CARDIAC_SPLIT_HZ = 250.0` (Sec. II.B: "components with dominant
-  frequencies below or equal to 250 Hz are classified as cardiac-related
-  signals... S1 primarily occupies 100-200 Hz, while S2 extends up to
-  250 Hz"). This is a physiological frequency in absolute Hz, not a value
-  normalized to the paper's own sample rate, so it's valid at any sample
-  rate whose Nyquist clears it -- including this project's 4000 Hz HLS_CMDS
-  copy (Nyquist 2000 Hz, 8x above the split). The paper's own dataset is
-  sourced from the same Torabi et al. HLS-CMDS descriptor paper this project
-  cites (their ref [19] = this project's own PROTOCOL.md Sec. 1 citation),
-  so there is no cross-dataset sample-rate mismatch here either.
-- `SSA_EIGENVALUE_THRESHOLD_PCT` (Sec. II.B: "the SSA decomposition produces
-  50 RC layers, an average contribution per mode is calculated as 2%...
-  a threshold of 2% is set"). Derived as `100/SSA_WINDOW_LENGTH` rather than
-  hardcoded, so it stays principled if the window length ever changes; it
-  equals exactly 2.0 for L=50, matching the paper.
-- `SSA_CORRELATION_THRESHOLD = 0.50` (Sec. II.B: "modes showing a
-  correlation above 50% are additionally included").
-
-Two-stage algorithm (Sec. II.A "Basic Algorithm" for the SSA math, II.B
-"Proposed Method" for the two stages and thresholds):
-
-  Stage 1 (cardiac): SSA-decompose the raw mixture (L=50) into 50
-  reconstructed components (RCs) via trajectory-matrix embedding + SVD +
-  diagonal averaging (Hankelization). Each RC's dominant frequency (Welch
-  PSD peak) sorts it into cardiac (<=250 Hz, summed directly into the final
-  heart_est -- Fig. 1 routes this branch straight to output, no stage-2
-  refinement) or into a residual pool (>250 Hz) that feeds stage 2.
-
-  Stage 2 (respiratory): SSA-decompose the residual (L=50 again) into a
-  fresh 50 RCs. RCs whose relative eigenvalue contribution clears the 2%
-  threshold are the initial "high-energy" respiratory set; each remaining
-  RC is then Pearson-correlated against that set's sum and added if the
-  correlation exceeds 50%. lung_est is the sum of the final selected set.
-  (Interpretation choice, since the paper doesn't fully spell out what "the
-  remaining modes" are correlated against: correlating each leftover RC
-  against the sum of the already-selected high-energy modes is the natural
-  reading of "the identified high-energy modes vs. the remaining modes" --
-  flagged here the same way Baseline 2's two-sided-mask extension is
-  flagged as this project's own interpretation, not literal paper text.)
+See code_description.md for the full writeup of each baseline (bandpass,
+supervised NMF, standard NMF, SSA, EVMD): papers, parameter choices, the
+ablation vs. leakage-trap reasoning, and the interpretation calls flagged as
+this project's own extensions of the source papers.
 
 Usage:
-    from baselines import fit_bandpass_baseline, make_supervised_nmf_baseline, make_standard_nmf_baseline, fit_ssa_baseline
+    from baselines import fit_bandpass_baseline, make_supervised_nmf_baseline, make_standard_nmf_baseline, fit_ssa_baseline, fit_evmd_baseline
     from eval_harness import cross_validate
 
     results_df, fold_summary, cv_summary = cross_validate(fit_bandpass_baseline, n_folds=5)
     results_df, fold_summary, cv_summary = cross_validate(make_supervised_nmf_baseline(seed=0), n_folds=5)
     results_df, fold_summary, cv_summary = cross_validate(make_standard_nmf_baseline(seed=0), n_folds=5)
     results_df, fold_summary, cv_summary = cross_validate(fit_ssa_baseline, n_folds=5)
+    results_df, fold_summary, cv_summary = cross_validate(fit_evmd_baseline, n_folds=5)
 """
 import librosa
 import numpy as np
 import pandas as pd
 from scipy.signal import butter, sosfiltfilt, welch
+
+from metrics import SOURCE_LABELS
 
 HEART_BAND = (20.0, 200.0)   # Hz
 LUNG_BAND = (150.0, 1000.0)  # Hz
@@ -166,6 +35,28 @@ def _bandpass(y: np.ndarray, sr: int, low: float, high: float, order: int = 4) -
     high_norm = min(high / nyquist, 1 - 1e-6)
     sos = butter(order, [low_norm, high_norm], btype="bandpass", output="sos")
     return sosfiltfilt(sos, y)
+
+
+def raw_mixture_separate(mixed: np.ndarray, _sr: int):
+    """
+    separate_fn(mixed, sr) -> (heart_est, lung_est) that performs no
+    separation at all -- both "estimates" are just the mixture. This is the
+    reference point every other baseline's SDR must be read against: SDR
+    already reflects a mixture-vs-two-references orthogonal projection even
+    with zero separation, so e.g. "Baseline 1 gets 5.46 dB SDR" is only
+    meaningful once you know what passthrough alone already scores on the
+    same rows. Also the fastest way to sanity-check the additivity axis
+    itself (see build_synthetic_mixes/verify_additive_triplets): on rows
+    where mixed != a*(heart+lung), a large chunk of the mixture's own energy
+    isn't in either reference's span, so *every* method -- including this
+    zero-op one -- inherits negative SAR from that non-additive residual.
+    """
+    return mixed, mixed
+
+
+def fit_raw_mixture_baseline(_hs_allowed, _ls_allowed):
+    """fit_and_separate_fn for eval_harness.cross_validate. No learned parameters, no dictionary pool needed."""
+    return raw_mixture_separate
 
 
 def bandpass_separate(mixed: np.ndarray, sr: int, heart_band=HEART_BAND, lung_band=LUNG_BAND):
@@ -417,6 +308,218 @@ def fit_ssa_baseline(_hs_allowed, _ls_allowed):
     return mssa_separate
 
 
+# --- Baseline 5: EVMD (S4-01) -----------------------------------------------
+#
+# Reproducing the separation stage (Sec. II.B) of Puneet, Shankar, Koluguri &
+# Srivastava, "Edge-Enabled Portable Classifier for Lung Sounds Using
+# Convolutional Neural Networks," IEEE BioCAS 2025, doi:
+# 10.1109/BioCAS67066.2025.00016 (`papers/Edge-Enabled_Portable_Classifier_
+# for_Lung_Sounds_Using_Convolutional_Neural_Networks.pdf`; `[edgelung]` in
+# PROTOCOL.md). That paper runs EVMD-based lung isolation directly on
+# HLS-CMDS mixtures but reports no separation metric at all -- this baseline
+# computing SDR/SIR/SAR for it is a direct instance of the gap this project
+# exists to close. See code_description.md for the full writeup, including
+# every place this reproduction has to fill in what the paper's own
+# description leaves ambiguous.
+
+EVMD_ALPHA = 2000.0             # Sec. II.B: "a balancing parameter alpha = 2000"
+EVMD_K_MIN, EVMD_K_MAX = 2, 10  # Sec. II.B: "begins with K=2 and incrementally increases up to K=10"
+EVMD_MU1 = 0.01                 # Energy Loss Coefficient threshold
+EVMD_MU2 = 0.4                  # Normalised Permutation Entropy threshold
+EVMD_MU3 = 0.3                  # Normalised Permutation Entropy Ratio threshold
+EVMD_MU4 = 0.05                 # Kurtosis Index threshold
+EVMD_HEART_LOWPASS_HZ = 150.0   # Sec. II.B: heart-isolating lowpass cutoff
+EVMD_NPE_EMBED_DIM = 5          # not stated in the paper -- a common default
+                                 # embedding dimension for permutation entropy
+EVMD_MAX_ITER = 100             # this project's own choice, not stated in the
+                                 # paper -- VMD literature commonly converges
+                                 # within 100-200 iterations at tol=1e-6, and
+                                 # the full K=2..10 sweep run over thousands of
+                                 # synthetic mixtures (synthetic_mix.py) makes
+                                 # runtime a real constraint
+EVMD_TOL = 1e-6
+
+
+def _lowpass(y: np.ndarray, sr: int, cutoff: float, order: int = 4) -> np.ndarray:
+    """Zero-phase Butterworth lowpass (companion to _bandpass, needed for EVMD's single-cutoff heart isolation)."""
+    nyquist = sr / 2
+    norm = min(cutoff / nyquist, 1 - 1e-6)
+    sos = butter(order, norm, btype="lowpass", output="sos")
+    return sosfiltfilt(sos, y)
+
+
+def _vmd(signal: np.ndarray, alpha: float, K: int, max_iter: int = EVMD_MAX_ITER, tol: float = EVMD_TOL) -> np.ndarray:
+    """
+    Variational Mode Decomposition (Dragomiretskiy & Zosso, IEEE Trans.
+    Signal Processing 2014), solved by ADMM in the frequency domain --
+    implemented directly (no VMD package is installed or in
+    requirements.txt), the same way Baseline 4's SSA was implemented from
+    scratch rather than pulled from a library.
+
+    Mirrors `signal` at both ends before transforming (standard VMD
+    practice, suppresses boundary artifacts in the mode estimates), then
+    crops the reconstruction back to the original length.
+
+    Returns modes, shape (K, len(signal)).
+    """
+    T = len(signal)
+    half = T // 2
+    f_mirror = np.concatenate([signal[:half][::-1], signal, signal[-half:][::-1]])
+    T_ext = len(f_mirror)
+
+    freqs = np.fft.fftfreq(T_ext)  # cycles/sample, in [-0.5, 0.5)
+    f_hat = np.fft.fft(f_mirror)
+
+    omega = 0.5 * np.arange(K) / K  # uniform init over [0, 0.5) cycles/sample
+    u_hat = np.zeros((K, T_ext), dtype=complex)
+    lambda_hat = np.zeros(T_ext, dtype=complex)
+
+    pos = freqs > 0
+    for _ in range(max_iter):
+        u_hat_prev = u_hat.copy()
+        sum_uk = u_hat.sum(axis=0)
+        for k in range(K):
+            sum_uk -= u_hat[k]
+            u_hat[k] = (f_hat - sum_uk + lambda_hat / 2) / (1 + alpha * (freqs - omega[k]) ** 2)
+            sum_uk += u_hat[k]
+
+            power = np.abs(u_hat[k][pos]) ** 2
+            denom = power.sum()
+            if denom > 0:
+                omega[k] = (freqs[pos] * power).sum() / denom
+
+        lambda_hat = lambda_hat + (f_hat - u_hat.sum(axis=0))
+
+        change = np.sum(np.abs(u_hat - u_hat_prev) ** 2) / (np.sum(np.abs(u_hat_prev) ** 2) + 1e-12)
+        if change < tol:
+            break
+
+    modes_ext = np.real(np.fft.ifft(u_hat, axis=1))
+    return modes_ext[:, half : half + T]
+
+
+def _normalized_permutation_entropy(x: np.ndarray, m: int = EVMD_NPE_EMBED_DIM) -> float:
+    """
+    Bandt-Pompe permutation entropy of `x`, normalized to [0, 1] by log(m!)
+    -- vectorized (sliding_window_view + argsort, no per-sample Python loop)
+    so it stays cheap across the K-sweep's many mode evaluations.
+    """
+    from math import factorial
+
+    if len(x) < m:
+        return 0.0
+    windows = np.lib.stride_tricks.sliding_window_view(x, m)
+    order = np.argsort(windows, axis=1)
+    codes = (order * (m ** np.arange(m))).sum(axis=1)
+    counts = np.bincount(codes, minlength=m**m)
+    counts = counts[counts > 0]
+    p = counts / counts.sum()
+    return float(-np.sum(p * np.log(p)) / np.log(factorial(m)))
+
+
+def _energy_loss_coefficient(signal: np.ndarray, modes: np.ndarray) -> float:
+    """||signal - sum(modes)||^2 / ||signal||^2 -- Sec. II.B's "energy loss coefficient" for a given K."""
+    reconstructed = modes.sum(axis=0)
+    return float(np.sum((signal - reconstructed) ** 2) / np.sum(signal**2))
+
+
+def _kurtosis_index(mode: np.ndarray) -> float:
+    """
+    Normalized excess-kurtosis index in (0, 1], used as EVMD's Kurtosis
+    Index fallback check. INTERPRETATION: mu4=0.05 is far too small to be a
+    threshold on raw Fisher excess kurtosis (unbounded, ~0 for Gaussian,
+    routinely >>1 for physiological transients), so this project reads mu4
+    as applying to a normalized index instead -- 1/(1+|excess kurtosis|),
+    near 1 for Gaussian-like modes, near 0 for strongly impulsive ones. Not
+    stated in the paper; flagged the same way _evmd_select_k's cascade is.
+    """
+    from scipy.stats import kurtosis
+
+    excess = float(kurtosis(mode, fisher=True, bias=False))
+    return 1.0 / (1.0 + abs(excess))
+
+
+def _evmd_select_k(signal: np.ndarray, sr: int):
+    """
+    Sec. II.B's K-selection sweep: try K=2..10, alpha=2000, stopping at the
+    first K where every mode passes the per-mode acceptance check below;
+    energy loss must also clear mu1 at that K.
+
+    INTERPRETATION (the paper's own text is thin here -- flagged per this
+    project's convention for filling gaps in a source paper, see Baseline 2/
+    4's docstrings): a mode with NPE <= mu2 passes outright (low-complexity,
+    clearly structured). A mode with NPE > mu2 additionally passes if BOTH
+    (a) its dominant frequency falls inside a recognized heart or lung band
+    (this project's own HEART_BAND/LUNG_BAND, from Baseline 1's PSD survey
+    -- read as the paper's unspecified "frequency domain signature" check)
+    AND (b) its NPE ratio (this mode's NPE over the highest NPE among the K
+    modes at this candidate K) is <= mu3. Failing that, a low
+    (<= mu4) normalized Kurtosis Index (_kurtosis_index) is treated as a
+    fallback pass. If no K in [2, 10] gets every mode through, this falls
+    back to K=10 and reports non-convergence (`converged=False`) rather than
+    forcing a pass -- a genuine, documented result, not a bug to paper over.
+
+    Returns (K, modes, converged: bool).
+    """
+    modes = None
+    for K in range(EVMD_K_MIN, EVMD_K_MAX + 1):
+        modes = _vmd(signal, EVMD_ALPHA, K)
+        if _energy_loss_coefficient(signal, modes) >= EVMD_MU1:
+            continue
+
+        npes = np.array([_normalized_permutation_entropy(mode) for mode in modes])
+        max_npe = npes.max() if len(npes) else 0.0
+
+        if _all_modes_pass(modes, npes, max_npe, sr):
+            return K, modes, True
+
+    return EVMD_K_MAX, modes, False  # `modes` is already the K=EVMD_K_MAX decomposition from the loop's last pass
+
+
+def _all_modes_pass(modes: np.ndarray, npes: np.ndarray, max_npe: float, sr: int) -> bool:
+    for mode, npe in zip(modes, npes):
+        if npe <= EVMD_MU2:
+            continue
+        freq = _peak_frequency(mode, sr)
+        in_band = (HEART_BAND[0] <= freq <= HEART_BAND[1]) or (LUNG_BAND[0] <= freq <= LUNG_BAND[1])
+        npe_ratio = npe / max_npe if max_npe > 0 else 0.0
+        if in_band and npe_ratio <= EVMD_MU3:
+            continue
+        if _kurtosis_index(mode) <= EVMD_MU4:
+            continue
+        return False
+    return True
+
+
+def evmd_separate(mixed: np.ndarray, sr: int):
+    """
+    separate_fn(mixed, sr) -> (heart_est, lung_est). EVMD-decompose `mixed`
+    (K selected per _evmd_select_k), isolate the mode "corresponding to the
+    cardiac frequency band" as the one with the lowest Welch-PSD peak
+    frequency (paper: singular "the mode," not a summed cardiac set --
+    distinct from Baseline 4's MSSA, which sums all cardiac-band RCs),
+    lowpass it at 150 Hz (the paper's own cutoff) for heart_est, then
+    subtract from the original mixture for lung_est (paper: "the sound
+    component of the heart is subtracted from the original signal, leaving
+    behind the residual lung sound").
+    """
+    _K, modes, _converged = _evmd_select_k(mixed, sr)
+    freqs = np.array([_peak_frequency(mode, sr) for mode in modes])
+    cardiac_mode = modes[int(np.argmin(freqs))]
+    heart_est = _lowpass(cardiac_mode, sr, EVMD_HEART_LOWPASS_HZ)
+    lung_est = mixed - heart_est
+    return heart_est, lung_est
+
+
+def fit_evmd_baseline(_hs_allowed, _ls_allowed):
+    """
+    fit_and_separate_fn for eval_harness.cross_validate. EVMD has no learned
+    parameters -- zero-training, same as fit_bandpass_baseline/
+    fit_ssa_baseline -- so the fold's allowed dictionary pool is unused here.
+    """
+    return evmd_separate
+
+
 # --- SSA-paper-style synthetic evaluation set -------------------------------
 
 SYNTHETIC_N_HEART = 10           # Sec. III: "10 random select cardiac"
@@ -471,7 +574,7 @@ def build_synthetic_mixes(seed: int = SYNTHETIC_SEED) -> list[dict]:
     return pairs
 
 
-def _run_synthetic_report(label: str, separate_fn, pairs: list[dict]) -> pd.DataFrame:
+def _run_synthetic_report(label: str, separate_fn, pairs: list[dict]) -> str:
     """
     Evaluate a plain separate_fn(mixed, sr) -> (heart_est, lung_est) over the
     synthetic pairs and report mean SDR + Pearson correlation per source, to
@@ -479,9 +582,14 @@ def _run_synthetic_report(label: str, separate_fn, pairs: list[dict]) -> pd.Data
     columns; no STOI here -- `pystoi` isn't in requirements.txt/`.venv` and
     this project didn't want to add a new dependency unasked-for, so STOI is
     a known gap relative to the paper's third metric).
+
+    Prints only a short progress line; returns an HTML <section> for the
+    combined results/baselines_report.html (see report_utils.py).
     """
     from metrics import evaluate_heart_lung
+    from report_utils import df_to_html, section
 
+    print(f"Running {label} on synthetic set ({len(pairs)} pairs)...")
     rows = []
     for pair in pairs:
         heart_est, lung_est = separate_fn(pair["mixed"], pair["sr"])
@@ -498,102 +606,184 @@ def _run_synthetic_report(label: str, separate_fn, pairs: list[dict]) -> pd.Data
         )
 
     df = pd.DataFrame(rows)
-    print(f"=== {label} (synthetic, {len(pairs)} pairs) ===")
-    print(df.mean().to_string())
-    print()
-    return df
+    mean_df = df.mean().to_frame(name="mean").T
+    return section(f"{label} (synthetic set)", f"{len(pairs)} pairs, mean over all pairs", df_to_html(mean_df, index_label=""))
 
 
-def _run_and_report(label: str, fit_fn, full_mix_df: pd.DataFrame, valid_mix_df: pd.DataFrame, seed: int = 0):
+def _run_and_report(label: str, fit_fn, full_mix_df: pd.DataFrame, valid_mix_df: pd.DataFrame, seed: int = 0) -> dict:
     """
     Run fit_fn's cross-validation on both the full Mix.csv and the
-    additive-only subset (load_dataset.verify_additive_triplets()), and
-    print both. Per TEEP2026_Sprint0_Review: the full-145-row headline is
-    known to be diluted by 109 rows whose "mixed" file is acoustically
-    unrelated to its named heart/lung sources on the current (GitHub, not
-    yet Mendeley) dataset copy -- see README.md's Dataset section. Both
-    fold-level (mean+/-std across folds) and row-level (mean/median pooled
-    across every evaluated row) numbers are printed and explicitly labeled,
-    since they are not interchangeable -- averaging within folds before
-    taking std understates row-to-row spread (the review's statistics note).
+    additive-only subset (load_dataset.verify_additive_triplets()). Per
+    TEEP2026_Sprint0_Review: the full-145-row headline is known to be
+    diluted by 109 rows whose "mixed" file is acoustically unrelated to its
+    named heart/lung sources on the current (GitHub, not yet Mendeley)
+    dataset copy -- see README.md's Dataset section. Both fold-level
+    (mean+/-std across folds) and row-level (mean/median pooled across every
+    evaluated row) numbers are reported and explicitly labeled, since they
+    are not interchangeable -- averaging within folds before taking std
+    understates row-to-row spread (the review's statistics note).
+
+    Prints only short progress lines; returns {"html": <section> for the
+    combined results/baselines_report.html, "cv_summary_full"/
+    "cv_summary_valid": the raw across-fold summaries, so __main__ can build
+    a ΔSDR-vs-baseline table without re-running cross_validate}.
     """
     from eval_harness import cross_validate, summarize_pooled
+    from report_utils import df_to_html, section
 
-    print(f"=== {label} ===\n")
+    print(f"Running {label}...")
 
-    print(f"-- Full {len(full_mix_df)} rows --")
+    print(f"  full {len(full_mix_df)} rows...")
     results_full, fold_summary_full, cv_summary_full = cross_validate(fit_fn, n_folds=5, seed=seed, mix_df=full_mix_df)
-    print("Per-fold means:")
-    print(fold_summary_full.to_string(index=False))
-    print("\nAcross-fold mean +/- std (fold-level dispersion):")
-    print(cv_summary_full.to_string())
-    print("\nPooled mean/median/std (row-level dispersion, every evaluated row):")
-    print(summarize_pooled(results_full).to_string())
+    full_body = "\n".join([
+        "<h4>Per-fold means</h4>",
+        df_to_html(fold_summary_full.set_index(["fold", "source"]), index_label="fold / source"),
+        "<h4>Across-fold mean &plusmn; std (fold-level dispersion)</h4>",
+        df_to_html(cv_summary_full, index_label="source"),
+        "<h4>Pooled mean/median/std (row-level dispersion, every evaluated row)</h4>",
+        df_to_html(summarize_pooled(results_full), index_label="source"),
+    ])
 
-    print(f"\n-- Additive-only {len(valid_mix_df)} rows (mixed ~= a*(heart+lung)) --")
+    print(f"  additive-only {len(valid_mix_df)} rows...")
     results_valid, fold_summary_valid, cv_summary_valid = cross_validate(
         fit_fn, n_folds=5, seed=seed, mix_df=valid_mix_df
     )
-    print("Per-fold means:")
-    print(fold_summary_valid.to_string(index=False))
-    print("\nAcross-fold mean +/- std (fold-level dispersion):")
-    print(cv_summary_valid.to_string())
-    print("\nPooled mean/median/std (row-level dispersion, every evaluated row):")
-    print(summarize_pooled(results_valid).to_string())
-    print()
+    valid_body = "\n".join([
+        "<h4>Per-fold means</h4>",
+        df_to_html(fold_summary_valid.set_index(["fold", "source"]), index_label="fold / source"),
+        "<h4>Across-fold mean &plusmn; std (fold-level dispersion)</h4>",
+        df_to_html(cv_summary_valid, index_label="source"),
+        "<h4>Pooled mean/median/std (row-level dispersion, every evaluated row)</h4>",
+        df_to_html(summarize_pooled(results_valid), index_label="source"),
+    ])
+
+    body = (
+        f'<h3>Full {len(full_mix_df)} rows</h3>\n{full_body}\n'
+        f'<h3>Additive-only {len(valid_mix_df)} rows (mixed &asymp; a&middot;(heart+lung))</h3>\n{valid_body}'
+    )
+    html = section(label, f"full {len(full_mix_df)} / additive-only {len(valid_mix_df)} rows", body)
+    return {
+        "html": html,
+        "cv_summary_full": cv_summary_full,
+        "cv_summary_valid": cv_summary_valid,
+    }
+
+
+def _delta_vs_raw_mixture_section(baseline_results: list, raw_cv_summary_valid: pd.DataFrame) -> str:
+    """
+    Delta-SDR table (additive-only subset only -- the full-145-row axis
+    isn't interpretable, see the report's dek): each baseline's across-fold
+    mean SDR minus Baseline 0's (raw mixture, no separation) mean SDR, per
+    source. This is the number that actually answers "did separation help
+    at all", since a baseline's raw SDR is meaningless without knowing what
+    passthrough already scores on the same rows.
+    """
+    from report_utils import df_to_html, section
+
+    rows = []
+    for label, cv_summary_valid in baseline_results:
+        row = {"baseline": label}
+        for src in SOURCE_LABELS:
+            row[f"{src}_sdr"] = cv_summary_valid.loc[src, ("sdr", "mean")]
+            row[f"delta_{src}_sdr"] = cv_summary_valid.loc[src, ("sdr", "mean")] - raw_cv_summary_valid.loc[src, ("sdr", "mean")]
+        rows.append(row)
+    delta_df = pd.DataFrame(rows).set_index("baseline")
+
+    return section(
+        "ΔSDR vs. raw mixture (additive-only subset)",
+        "across-fold mean SDR minus Baseline 0's (no separation)",
+        df_to_html(delta_df, index_label="baseline", float_fmt="{:.2f}"),
+    )
 
 
 if __name__ == "__main__":
     from load_dataset import load_mix, verify_additive_triplets
+    from report_utils import report_shell, results_dir, stat_tile, write_report
 
+    print("Loading Mix.csv and checking additivity (mixed ~= a*(heart+lung))...")
     full_mix_df = load_mix()
     additivity = verify_additive_triplets(full_mix_df)
     valid_mix_df = full_mix_df[full_mix_df["Mixed Sound ID"].isin(additivity["valid_ids"])].reset_index(drop=True)
-    print(
-        f"Dataset: {len(full_mix_df)} rows total, {len(valid_mix_df)} pass the additivity check "
-        f"(mixed ~= a*(heart+lung)) -- see README.md's Dataset section before trusting either number.\n\n"
+    print(f"Dataset: {len(full_mix_df)} rows total, {len(valid_mix_df)} pass the additivity check")
+
+    baseline_specs = [
+        ("Baseline 0 (raw mixture, no separation)", fit_raw_mixture_baseline),
+        (f"Baseline 1 (bandpass): heart={HEART_BAND} Hz, lung={LUNG_BAND} Hz", fit_bandpass_baseline),
+        (
+            f"Baseline 2 (supervised NMF): Ki(heart)={K_HEART}, Kr(lung)={K_LUNG}, "
+            f"dict_iters={DICT_ITERS}, activation_iters={ACTIVATION_ITERS}",
+            make_supervised_nmf_baseline(seed=0),
+        ),
+        (
+            f"Baseline 3 (standard NMF, no learned dictionary; ablation against Baseline 2): "
+            f"k_total={K_HEART + K_LUNG}, iters={STANDARD_NMF_ITERS}",
+            make_standard_nmf_baseline(seed=0),
+        ),
+        (
+            f"Baseline 4 (MSSA, reproducing Han & Quan ICSPS 2025): L={SSA_WINDOW_LENGTH}, "
+            f"split={SSA_CARDIAC_SPLIT_HZ} Hz, eigenvalue_threshold={SSA_EIGENVALUE_THRESHOLD_PCT}%, "
+            f"correlation_threshold={SSA_CORRELATION_THRESHOLD}",
+            fit_ssa_baseline,
+        ),
+    ]
+
+    baseline_run_results = [
+        (label, _run_and_report(label, fit_fn, full_mix_df, valid_mix_df)) for label, fit_fn in baseline_specs
+    ]
+    sections = [r["html"] for _label, r in baseline_run_results]
+
+    raw_cv_summary_valid = baseline_run_results[0][1]["cv_summary_valid"]
+    sections.append(
+        _delta_vs_raw_mixture_section(
+            [(label, r["cv_summary_valid"]) for label, r in baseline_run_results[1:]],
+            raw_cv_summary_valid,
+        )
     )
 
-    _run_and_report(
-        f"Baseline 1 (bandpass): heart={HEART_BAND} Hz, lung={LUNG_BAND} Hz",
-        fit_bandpass_baseline,
-        full_mix_df,
-        valid_mix_df,
-    )
-
-    _run_and_report(
-        f"Baseline 2 (supervised NMF): Ki(heart)={K_HEART}, Kr(lung)={K_LUNG}, "
-        f"dict_iters={DICT_ITERS}, activation_iters={ACTIVATION_ITERS}",
-        make_supervised_nmf_baseline(seed=0),
-        full_mix_df,
-        valid_mix_df,
-    )
-
-    _run_and_report(
-        f"Baseline 3 (standard NMF, no learned dictionary; ablation against Baseline 2): "
-        f"k_total={K_HEART + K_LUNG}, iters={STANDARD_NMF_ITERS}",
-        make_standard_nmf_baseline(seed=0),
-        full_mix_df,
-        valid_mix_df,
-    )
-
-    _run_and_report(
-        f"Baseline 4 (MSSA, reproducing Han & Quan ICSPS 2025): L={SSA_WINDOW_LENGTH}, "
-        f"split={SSA_CARDIAC_SPLIT_HZ} Hz, eigenvalue_threshold={SSA_EIGENVALUE_THRESHOLD_PCT}%, "
-        f"correlation_threshold={SSA_CORRELATION_THRESHOLD}",
-        fit_ssa_baseline,
-        full_mix_df,
-        valid_mix_df,
-    )
-
+    print("Building SSA-paper-style synthetic evaluation set...")
     synthetic_pairs = build_synthetic_mixes(seed=SYNTHETIC_SEED)
     print(
-        f"\nSSA-paper-style synthetic set: {len(synthetic_pairs)} pairs "
+        f"Synthetic set: {len(synthetic_pairs)} pairs "
         f"({SYNTHETIC_N_HEART} heart x {SYNTHETIC_N_LUNG} lung, all combinations), "
-        f"{SYNTHETIC_NOISE_RMS_FRAC * 100:.0f}% RMS Gaussian noise added -- see "
-        f"paper Table I for the reference numbers (MSSA: cardiac SDR 26.4 dB / "
-        f"corr 99.2%, respiratory SDR 5.3 dB / corr 80.5%; Butterworth baseline: "
-        f"cardiac SDR 5.7 dB, respiratory SDR -5.7 dB).\n"
+        f"{SYNTHETIC_NOISE_RMS_FRAC * 100:.0f}% RMS Gaussian noise added"
     )
-    _run_synthetic_report("Baseline 1 (bandpass)", bandpass_separate, synthetic_pairs)
-    _run_synthetic_report("Baseline 4 (MSSA)", mssa_separate, synthetic_pairs)
+    sections.append(_run_synthetic_report("Baseline 0 (raw mixture, no separation)", raw_mixture_separate, synthetic_pairs))
+    sections.append(_run_synthetic_report("Baseline 1 (bandpass)", bandpass_separate, synthetic_pairs))
+    sections.append(_run_synthetic_report("Baseline 4 (MSSA)", mssa_separate, synthetic_pairs))
+
+    stat_tiles = "\n".join([
+        stat_tile("Mix rows", str(len(full_mix_df)), "total"),
+        stat_tile("Additive rows", str(len(valid_mix_df)), f"{100 * len(valid_mix_df) / len(full_mix_df):.0f}%"),
+        stat_tile("Baselines run", "5", "0-4, + 3 synthetic"),
+    ])
+
+    html = report_shell(
+        title="Baseline Separation Results",
+        eyebrow="HLS-CMDS · separation baselines",
+        heading="Baselines 0&ndash;4 + SSA-paper synthetic set",
+        dek=(
+            "Cross-validated SDR/SIR/SAR for each baseline on the full Mix.csv and the "
+            "additive-only subset, plus a synthetic-set comparison against the SSA "
+            "paper's own Table I (MSSA: cardiac SDR 26.4 dB / corr 99.2%, respiratory "
+            "SDR 5.3 dB / corr 80.5%; Butterworth baseline: cardiac SDR 5.7 dB, "
+            "respiratory SDR -5.7 dB). <strong>The full-145-row numbers are not "
+            "interpretable as separation quality</strong> -- 109 rows have mixed != "
+            "a*(heart+lung), so a large share of the mixture's own energy sits outside "
+            "the span of both references and every method (including Baseline 0) "
+            "inherits negative SAR from that non-additive residual. Only the "
+            "additive-only 36-row numbers, and the ΔSDR-vs-Baseline-0 table below, "
+            "should be read as separation quality."
+        ),
+        stat_tiles=stat_tiles,
+        body="\n\n".join(sections),
+        footer=(
+            "<p><strong>Method.</strong> See <code>baselines.py</code> / "
+            "<code>code_description.md</code> for each baseline's parameters and "
+            "interpretation notes. Baseline 0 added specifically so every other "
+            "baseline's SDR can be read as a delta over doing nothing, not an "
+            "absolute number.</p>"
+        ),
+    )
+
+    report_path = write_report(results_dir() / "baselines_report.html", html)
+    print(f"\nReport written to {report_path}")

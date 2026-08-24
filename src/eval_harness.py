@@ -1,14 +1,9 @@
 """
 K-fold evaluation harness for heart/lung separation models on the mix set.
 
-Wires split.py's leakage-safe fold assignment into metrics.py's BSS Eval:
-for each fold, a caller-supplied function fits a dictionary/model on that
-fold's allowed HS/LS recordings only (i.e. excluding anything that also
-appears in that fold's held-out mixtures) and returns a separation
-function, which is then evaluated on the held-out mix rows. Results are
-tagged by fold and source, then aggregated two ways:
-  - per-fold means (one row per fold x source)
-  - across-fold mean +/- std (the CV estimate of generalization performance)
+See code_description.md for how it wires split.py's fold assignment into
+metrics.py's BSS Eval and how results get aggregated per-fold and across
+folds.
 
 Usage:
     from eval_harness import cross_validate
@@ -112,7 +107,9 @@ def aggregate_across_folds(fold_summary: pd.DataFrame) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    # Smoke test with two baselines that don't actually use the dictionary pool,
+    from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
+
+    # Smoke test with a baseline that doesn't actually use the dictionary pool,
     # just to exercise the fold machinery end-to-end against real dataset audio.
     def identity_baseline(_hs_allowed, _ls_allowed):
         # "Fits" nothing; separate_fn just isn't given the mixed signal's ground
@@ -122,10 +119,42 @@ if __name__ == "__main__":
 
         return separate
 
+    print("Running eval harness plumbing smoke test (no-separation baseline, 5 folds)...")
     results_df, fold_summary, cv_summary = cross_validate(identity_baseline, n_folds=5, seed=0)
+    print(f"Evaluated {len(results_df)} (fold, mix row, source) rows across {results_df['fold'].nunique()} folds")
 
-    print(f"{len(results_df)} (fold, mix row, source) evaluations across {results_df['fold'].nunique()} folds\n")
-    print("Per-fold means:")
-    print(fold_summary.to_string(index=False))
-    print("\nAcross-fold mean +/- std (headline CV result):")
-    print(cv_summary.to_string())
+    stat_tiles = "\n".join([
+        stat_tile("Evaluations", str(len(results_df)), "rows"),
+        stat_tile("Folds", str(results_df["fold"].nunique()), "folds"),
+        stat_tile("Sources", str(len(SOURCE_LABELS)), " / ".join(SOURCE_LABELS)),
+    ])
+
+    body = "\n\n".join([
+        section(
+            "Per-fold means",
+            "mean sdr/sir/sar per (fold, source)",
+            df_to_html(fold_summary.set_index(["fold", "source"]), index_label="fold / source"),
+        ),
+        section(
+            "Across-fold mean ± std",
+            "headline CV result (no-separation baseline, plumbing check only)",
+            df_to_html(cv_summary, index_label="source"),
+        ),
+    ])
+
+    html = report_shell(
+        title="Eval Harness Smoke Test",
+        eyebrow="HLS-CMDS · k-fold plumbing check",
+        heading="No-separation baseline through the full harness",
+        dek=(
+            "Smoke test only — separate_fn just returns the mixture unchanged, so "
+            "this exercises fold assignment + BSS Eval wiring end-to-end, not "
+            "separation quality."
+        ),
+        stat_tiles=stat_tiles,
+        body=body,
+        footer="<p><strong>Method.</strong> See <code>eval_harness.py</code>'s <code>cross_validate()</code>.</p>",
+    )
+
+    report_path = write_report(results_dir() / "eval_harness_smoke_test.html", html)
+    print(f"Report written to {report_path}")

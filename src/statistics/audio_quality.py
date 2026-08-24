@@ -1,15 +1,8 @@
 """
 Audio quality + per-class/per-location statistics for the HLS-CMDS dataset.
 
-Scans every .wav file referenced by HS.csv, LS.csv, and Mix.csv (via
-load_dataset.py) and reports, per file:
-    - duration (s)
-    - sample rate (Hz)
-    - channel count
-    - clipping (fraction of samples pinned at full-scale +/-32767)
-
-Then aggregates those per-file properties by class (Heart/Lung Sound Type)
-and by recording Location.
+See code_description.md for what's computed per file and how it's
+aggregated.
 
 Usage:
     python src/statistics/audio_quality.py
@@ -21,10 +14,8 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
 from load_dataset import load_hs, load_ls, load_mix
-
-OUTPUT_DIR = Path(__file__).resolve().parent
 
 # A 16-bit PCM sample is clipped if it sits at the full-scale rail (+/-32767/32768).
 CLIP_THRESHOLD_INT16 = 32767
@@ -139,32 +130,51 @@ def summarize_all() -> dict:
 
 
 if __name__ == "__main__":
+    from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
+
+    print("Scanning HS/LS/Mix audio files for duration/sample-rate/clipping stats...")
     result = summarize_all()
     overall = result["overall"]
+    print(f"Scanned {overall['n_files']} audio files, {overall['n_clipped']} clipped ({overall['clipped_pct']:.1f}%)")
 
-    print(f"Scanned {overall['n_files']} audio files")
-    print(f"  Sample rate(s): {overall['sample_rates']} Hz")
-    print(f"  Channel count(s): {overall['channels']}")
-    print(f"  Duration: mean={overall['duration_mean']:.2f}s "
-          f"min={overall['duration_min']:.2f}s max={overall['duration_max']:.2f}s")
-    print(f"  Clipped files: {overall['n_clipped']} ({overall['clipped_pct']:.1f}%)")
+    stat_tiles = "\n".join([
+        stat_tile("Files scanned", str(overall["n_files"]), "wav files"),
+        stat_tile("Clipped files", str(overall["n_clipped"]), f"{overall['clipped_pct']:.1f}%", overall["n_clipped"] == 0),
+        stat_tile(
+            "Duration",
+            f"{overall['duration_mean']:.1f}s",
+            f"min {overall['duration_min']:.1f} / max {overall['duration_max']:.1f}",
+        ),
+    ])
 
-    print("\n=== Heart Sound Type: per-class stats ===")
-    print(result["hs_by_type"].to_string())
+    body = "\n\n".join([
+        section("Heart Sound Type: per-class stats", "HS.csv", df_to_html(result["hs_by_type"], index_label="Heart Sound Type")),
+        section("Lung Sound Type: per-class stats", "LS.csv", df_to_html(result["ls_by_type"], index_label="Lung Sound Type")),
+        section("Heart recordings: per-location stats", "HS.csv", df_to_html(result["hs_by_location"], index_label="Location")),
+        section("Lung recordings: per-location stats", "LS.csv", df_to_html(result["ls_by_location"], index_label="Location")),
+    ])
 
-    print("\n=== Lung Sound Type: per-class stats ===")
-    print(result["ls_by_type"].to_string())
+    html = report_shell(
+        title="Audio Quality Report",
+        eyebrow="HLS-CMDS · audio quality & per-class stats",
+        heading="Duration, sample rate & clipping, per class / location",
+        dek=(
+            f"Sample rate(s): {overall['sample_rates']} Hz &middot; channel count(s): "
+            f"{overall['channels']}, scanned across every .wav referenced by "
+            "<code>HS.csv</code>, <code>LS.csv</code>, and <code>Mix.csv</code>."
+        ),
+        stat_tiles=stat_tiles,
+        body=body,
+        footer="<p><strong>Method.</strong> See <code>statistics/audio_quality.py</code>'s <code>summarize_all()</code>.</p>",
+    )
 
-    print("\n=== Heart recordings: per-location stats ===")
-    print(result["hs_by_location"].to_string())
+    report_path = write_report(results_dir() / "audio_quality_report.html", html)
+    print(f"Report written to {report_path}")
 
-    print("\n=== Lung recordings: per-location stats ===")
-    print(result["ls_by_location"].to_string())
-
-    csv_dir = OUTPUT_DIR / "audio_quality_reports"
+    csv_dir = results_dir() / "audio_quality_reports"
     csv_dir.mkdir(exist_ok=True)
     result["hs_by_type"].to_csv(csv_dir / "hs_by_type.csv")
     result["ls_by_type"].to_csv(csv_dir / "ls_by_type.csv")
     result["hs_by_location"].to_csv(csv_dir / "hs_by_location.csv")
     result["ls_by_location"].to_csv(csv_dir / "ls_by_location.csv")
-    print(f"\nPer-class / per-location CSVs written to {csv_dir}/")
+    print(f"Per-class / per-location CSVs written to {csv_dir}/")

@@ -1,13 +1,8 @@
 """
 Audio Waveform Plotter
 
-This Python script allows you to visualize and plot time-domain waveforms of audio files and play them back using the IPython library. It is specifically designed to handle heart and lung sound data but can be applied to any audio file.
-
-## Features:
-- Plot multiple waveforms in one figure.
-- Automatically adjust for the number of audio files.
-- Save the figure as an image file.
-- Play the audio file directly using IPython.
+Visualizes and plots time-domain waveforms of audio files and plays them
+back using IPython. See code_description.md for the feature list.
 
 ## Citation:
 If you use this code or the associated dataset in your research, please cite the following paper:
@@ -28,7 +23,7 @@ import os
 from pathlib import Path
 import IPython.display as ipd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
 from load_dataset import load_hs, load_ls
 
 
@@ -113,13 +108,34 @@ def play_audio(audio_path):
 
 
 if __name__ == "__main__":
+    from report_utils import image_figure, report_shell, results_dir, section, write_report
+
     examples = _example_rows()
     audio_files = [path for path, _title in examples]
     titles = [title for _path, title in examples]
 
-    # Plot and save combined waveforms
-    plot_combined_waveforms(audio_files, titles)
+    print(f"Plotting waveforms for {len(examples)} example recordings...")
+    plots_dir = results_dir() / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    output_path = plots_dir / "combined_plots.png"
+    plot_combined_waveforms(audio_files, titles, output_file=str(output_path))
+    plt.close("all")
 
-    # Play one of the audio files
-    audio_to_play = audio_files[-1]  # the lung example
-    play_audio(audio_to_play)
+    html = report_shell(
+        title="Waveform Examples",
+        eyebrow="HLS-CMDS · audio_plotter.py",
+        heading="Example heart/lung waveforms",
+        dek=(
+            "Time-domain waveforms for three illustrative recordings (two heart "
+            "conditions, one lung condition), pulled live from HS.csv/LS.csv."
+        ),
+        stat_tiles="",
+        body=section(
+            "Combined waveforms",
+            ", ".join(titles),
+            image_figure(f"plots/{output_path.name}", ", ".join(titles)),
+        ),
+        footer="<p><strong>Method.</strong> See <code>audio_plotter.py</code>'s <code>plot_combined_waveforms()</code>.</p>",
+    )
+    report_path = write_report(results_dir() / "audio_plotter_report.html", html)
+    print(f"Report written to {report_path}")

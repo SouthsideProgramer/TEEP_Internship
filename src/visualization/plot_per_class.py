@@ -20,10 +20,8 @@ import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
 from load_dataset import load_hs, load_ls
-
-OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 
 
 def _representative_rows(df, type_col):
@@ -83,7 +81,10 @@ def plot_spectrogram_grid(rows, title, ncols=4):
 
 
 def main():
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    from report_utils import image_figure, report_shell, results_dir, section, write_report
+
+    plots_dir = results_dir() / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
 
     hs_reps = _representative_rows(load_hs(), "Heart Sound Type")
     hs_reps["class_label"] = hs_reps["Heart Sound Type"]
@@ -91,23 +92,42 @@ def main():
     ls_reps = _representative_rows(load_ls(), "Lung Sound Type")
     ls_reps["class_label"] = ls_reps["Lung Sound Type"]
 
+    print(f"Rendering waveform + spectrogram grids for {len(hs_reps)} heart / {len(ls_reps)} lung classes...")
+
     fig = plot_waveform_grid(hs_reps, "Heart Sound Types — representative waveforms")
-    fig.savefig(OUTPUT_DIR / "waveforms_heart_per_class.png", dpi=120)
+    fig.savefig(plots_dir / "waveforms_heart_per_class.png", dpi=120)
     plt.close(fig)
 
     fig = plot_waveform_grid(ls_reps, "Lung Sound Types — representative waveforms")
-    fig.savefig(OUTPUT_DIR / "waveforms_lung_per_class.png", dpi=120)
+    fig.savefig(plots_dir / "waveforms_lung_per_class.png", dpi=120)
     plt.close(fig)
 
     fig = plot_spectrogram_grid(hs_reps, "Heart Sound Types — representative mel-spectrograms")
-    fig.savefig(OUTPUT_DIR / "spectrograms_heart_per_class.png", dpi=120)
+    fig.savefig(plots_dir / "spectrograms_heart_per_class.png", dpi=120)
     plt.close(fig)
 
     fig = plot_spectrogram_grid(ls_reps, "Lung Sound Types — representative mel-spectrograms")
-    fig.savefig(OUTPUT_DIR / "spectrograms_lung_per_class.png", dpi=120)
+    fig.savefig(plots_dir / "spectrograms_lung_per_class.png", dpi=120)
     plt.close(fig)
 
-    print(f"Wrote 4 figures to {OUTPUT_DIR}/")
+    body = "\n\n".join([
+        section("Heart waveforms", f"{len(hs_reps)} classes", image_figure("plots/waveforms_heart_per_class.png", "heart waveforms per class")),
+        section("Lung waveforms", f"{len(ls_reps)} classes", image_figure("plots/waveforms_lung_per_class.png", "lung waveforms per class")),
+        section("Heart spectrograms", f"{len(hs_reps)} classes", image_figure("plots/spectrograms_heart_per_class.png", "heart spectrograms per class")),
+        section("Lung spectrograms", f"{len(ls_reps)} classes", image_figure("plots/spectrograms_lung_per_class.png", "lung spectrograms per class")),
+    ])
+
+    html = report_shell(
+        title="Per-Class Waveforms & Spectrograms",
+        eyebrow="HLS-CMDS · plot_per_class.py",
+        heading="One representative recording per class",
+        dek="Waveform and mel-spectrogram grids, one representative recording per Heart Sound Type (10 classes) and Lung Sound Type (6 classes).",
+        stat_tiles="",
+        body=body,
+        footer="<p><strong>Method.</strong> See <code>plot_per_class.py</code>.</p>",
+    )
+    report_path = write_report(results_dir() / "plot_per_class_report.html", html)
+    print(f"Report written to {report_path}")
 
 
 if __name__ == "__main__":

@@ -1,22 +1,8 @@
 """
 Leakage-safe, triplet-level train/eval split for the HLS-CMDS mix set.
 
-Why this exists: Mix.csv's 145 rows only draw from 89 distinct heart
-recordings and 74 distinct lung recordings (some reused up to 6x across
-different mixtures), and a third of those recordings are byte-identical to
-a file also listed standalone in HS.csv/LS.csv -- the same recordings you'd
-learn a separation dictionary from. Splitting by Mixed Sound ID, or fitting
-a dictionary on "all of HS.csv/LS.csv", leaks ground truth into training:
-a recording can sit in one mix row's evaluation fold while its literal
-duplicate (or a mix row sharing it) sits in the dictionary-fitting pool.
-
-The split unit here is therefore a *leak group*: mix rows are connected
-whenever they share a heart or a lung recording (by audio content, not by
-ID string -- HS.csv and Mix.csv use different ID namespaces for the same
-underlying files), and the resulting connected components -- not individual
-rows -- are what gets assigned to folds. Any HS.csv/LS.csv recording whose
-content matches a recording in a held-out fold is excluded from that fold's
-dictionary-fitting pool.
+See code_description.md for why a naive split leaks ground truth into
+training and how "leak groups" are computed and assigned to folds.
 
 Usage:
     from split import assign_folds, dictionary_pool
@@ -138,20 +124,63 @@ def dictionary_pool(
 
 
 if __name__ == "__main__":
+    from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
+
+    print("Assigning leakage-safe folds...")
     mix_df = assign_folds(n_folds=5, seed=0)
     hs_df, ls_df = load_hs(), load_ls()
 
-    print("Leak groups:", mix_df["leak_group"].nunique(), "covering", len(mix_df), "mix rows")
-    print("Group sizes:", sorted(mix_df.groupby("leak_group").size().tolist(), reverse=True))
-    print()
-    print("Fold sizes (mix rows):")
-    print(mix_df.groupby("fold").size().to_string())
-    print()
+    n_groups = mix_df["leak_group"].nunique()
+    group_sizes = sorted(mix_df.groupby("leak_group").size().tolist(), reverse=True)
+    fold_sizes = mix_df.groupby("fold").size().rename("mix_rows").to_frame()
 
+    print("Computing per-fold dictionary pools...")
+    pool_rows = []
     for k in sorted(mix_df["fold"].unique()):
         hs_allowed, ls_allowed = dictionary_pool(hs_df, ls_df, mix_df, held_out_fold=k)
-        n_eval = (mix_df["fold"] == k).sum()
-        print(
-            f"fold {k}: {n_eval} eval rows, "
-            f"dictionary pool = {len(hs_allowed)}/{len(hs_df)} HS + {len(ls_allowed)}/{len(ls_df)} LS recordings"
-        )
+        pool_rows.append({
+            "fold": k,
+            "eval_rows": int((mix_df["fold"] == k).sum()),
+            "hs_allowed": len(hs_allowed),
+            "hs_total": len(hs_df),
+            "ls_allowed": len(ls_allowed),
+            "ls_total": len(ls_df),
+        })
+    pool_df = pd.DataFrame(pool_rows).set_index("fold")
+
+    stat_tiles = "\n".join([
+        stat_tile("Leak groups", str(n_groups), f"over {len(mix_df)} mix rows"),
+        stat_tile("Largest group", str(group_sizes[0]), "mix rows"),
+        stat_tile("Folds", str(mix_df["fold"].nunique()), "folds"),
+    ])
+
+    body = "\n\n".join([
+        section("Fold sizes", "mix rows per fold", df_to_html(fold_sizes, index_label="fold")),
+        section(
+            "Leak group sizes",
+            f"{n_groups} groups, largest first",
+            f'<p class="mono-block">{", ".join(map(str, group_sizes))}</p>',
+        ),
+        section(
+            "Dictionary pool per fold",
+            "HS/LS recordings left after excluding the held-out fold's content",
+            df_to_html(pool_df, index_label="fold"),
+        ),
+    ])
+
+    html = report_shell(
+        title="Fold Split Report",
+        eyebrow="HLS-CMDS · leakage-safe split",
+        heading="Leak-group fold assignment",
+        dek=(
+            "Mix.csv rows grouped into leak-safe folds (connected components by shared "
+            "heart/lung recording); per-fold dictionary pool shows how many HS/LS "
+            "recordings remain once anything reused in the held-out fold is excluded."
+        ),
+        stat_tiles=stat_tiles,
+        body=body,
+        footer="<p><strong>Method.</strong> See <code>split.py</code> / <code>code_description.md</code>.</p>",
+    )
+
+    report_path = write_report(results_dir() / "split_report.html", html)
+    print(f"Report written to {report_path}")

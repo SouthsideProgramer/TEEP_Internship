@@ -35,9 +35,9 @@ Six papers reviewed, organized by what each one actually measures:
 |---|---|---|---|---|---|---|
 | HLS-CMDS descriptor (Torabi et al.) | — (source) | — | — | — | — | — |
 | AI-Driven Cardiorespiratory Signal Processing (LingoNMF / PL-NMF) [aidriven] | HLS-CMDS | PL-NMF (parallel multi-layer NMF, heart/lung-tuned) + LLM-derived fundamental frequency | not reported (paired t-test on an unspecified quality proxy) | clustering + anomaly detection, **not** accuracy | "statistically significant gains," p<0.01 | not stated |
-| Spectrotemporal Deep Learning for Heart Sound Classification [spectrotemporal] | PhysioNet 2016 | not fully characterized here (needs a primary-source read) — includes a computational-separation experiment, not raw-PCG-only as previously logged | n/a | binary normal/abnormal classification, **including on separated audio** | **Experiment 4: accuracy 89% (clean) → 41% (computationally separated) — per TEEP2026_Sprint0_Review, this is the single result this whole project exists to explain; not yet independently confirmed from the primary source here** | not stated |
+| Spectrotemporal Deep Learning for Heart Sound Classification [spectrotemporal] | **Resolved from primary source (2026-08-24), Secs. 3/5**: PhysioNet 2016 for initial training, **HLS-CMDS itself** for external validation (not a separate/unrelated dataset) | **bandpass filter** (Experiment 4's stress test: heart sounds computationally separated from HLS-CMDS's own mixed heart-lung recordings) | none (no SDR/SIR/SAR — only downstream classification accuracy is reported) | 4-class PCG classification (Normal/Murmur/Extra Sound/Rhythm Disorder), **including on separated audio** | **Confirmed from the primary source directly, not the review's summary**: accuracy 89.0% (Exp. 3, clean HLS-CMDS) → 41.0% (Exp. 4, bandpass-separated) — Table 9: n=5365, weighted F1 0.89→0.39. This is the single result this whole project exists to explain, and (per their own Sec. 6.2) the collapse is attributed to bandpass-filter artifacts on spectrally-overlapping signals — the same method class as this project's own Baseline 1. | not stated |
 | Respiratory Disease Classification (NMF-enhanced log-mel + CRNN) [nmfcrnn] | **Resolved from primary source (Sec. 3.2.3/4.1) — not a conflict, two datasets for two roles**: HLS-CMDS isolated heart/lung recordings are used *only* as an auxiliary corpus for offline NMF dictionary learning ("HLS-CMDS recordings were used exclusively for dictionary learning"); the actual *classification* dataset/results are ICBHI 2017 + Fraiwan CWLS, harmonized into a 7-class cohort (Asthma, Bronchiectasis, Bronchiolitis, COPD, Healthy, Pneumonia, URTI). HLS-CMDS is what feeds Baseline 2's hyperparameters. | NMF-based respiratory enhancement (Kr=20 respiratory / Ki=10 interference dictionary ranks, 100 MU dict iters, 60 MU activation iters, 4th-order Butterworth 50–1800 Hz denoise before STFT/NMF — all confirmed directly, matches `src/baselines.py` Baseline 2 exactly as of this cross-check) | **none** (no SNR/SDR/SI-SDR/correlation/spectral-distortion/error-energy) — confirmed by direct read, not just the review's summary | multi-class respiratory disease classification | 96.14±0.50% acc, 94.05±1.21 Macro-F1; denoised-ablation Macro-F1 84.98±22.0 over 10 seeds | **recording-level**, not subject-level (authors' own flagged limitation) |
-| Edge-Enabled Portable Lung-Sound Classifier (ESP32 + PYNQ-ZU) [edgelung] | **HLS-CMDS** | proposed lung isolation from mixtures | **none** — no SNR, SDR, correlation, or spectral-error figure | lung sound classification | not detailed / separation step "reports no result" | not stated |
+| Edge-Enabled Portable Lung-Sound Classifier [edgelung] | **HLS-CMDS** | EVMD (Enhanced Variational Mode Decomposition, Sec. II.B) + 150 Hz lowpass to isolate/subtract the cardiac mode | **none in the original paper** — no SNR, SDR, correlation, or spectral-error figure, despite running directly on HLS-CMDS's paired mixtures | lung sound classification (on the *HF_Lung V1* dataset, not HLS-CMDS — HLS-CMDS is only the EVMD-filtering demo/auxiliary set, Sec. II.B) | not detailed / separation step "reports no result" in the original paper — **now reproduced as this project's Baseline 5 (S4-01)**, the first SDR/SIR/SAR numbers computed for this method on HLS-CMDS (see `results/first_sdr_sir_sar_table.html`) | not stated. **Correction (2026-08-24)**: edge hardware is a PYNQ-ZU **FPGA board** (~15 W total system power, Sec. III), not an MCU — the ESP32 microcontroller only handles acquisition (stethoscope digitization + HTTP POST of raw PCM), not inference; earlier drafts here mischaracterized this as "ESP32 + PYNQ-ZU" implying a hybrid MCU inference target. |
 | Performance Measurement in Blind Audio Source Separation | — (methods paper) | — | defines SDR/SIR/SAR (BSS Eval) | n/a | n/a | n/a |
 | Cardiorespiratory Sound Separation Using SSA [ssa] | **Resolved from primary source (§III)**: HLS-CMDS isolated recordings (cites the same Torabi et al. descriptor paper this project uses), but *not* HLS-CMDS's own Mix.csv — the authors synthetically all-pairs-combine 10 cardiac x 5 respiratory recordings into 50 test mixtures, then add 2% RMS Gaussian noise. Not directly comparable to this project's own (real, additive) Baseline 1–3 results: the SSA paper's mixtures have an actual noise floor this project's don't, per PROTOCOL.md's own note below. | two-stage Singular Spectrum Analysis (L=50) | SDR, STOI, ground-truth correlation, vs. 5 baselines. **Confirmed from Table I directly**: the Butterworth bandpass baseline scores SDR 5.7 dB cardiac / **-5.7 dB respiratory** (i.e. negative — filtering alone fails on the respiratory side entirely), STOI 0.5/[unreported], correlation not tabulated for this row in the excerpt read. This confirms (not just "likely") the 5.7 dB figure previously guessed at in `src/baselines.py`'s review section. | **none** — no classification | respiratory SDR 5.34 dB (MSSA) vs. 4.64 dB (first-stage SSA); cardiac 26.44 dB both stages; respiratory correlation 80.5% (MSSA) vs. 77.2% (SSA) vs. 10.2% (their own NMF baseline, cardiac 50.0%) — all confirmed from Table I directly, not the review's summary | n/a |
 
@@ -45,7 +45,7 @@ Six papers reviewed, organized by what each one actually measures:
 - `[aidriven]` Torabi, PhD thesis, McMaster, 2025.
 - `[spectrotemporal]` Yaqub et al., *CMES*, 2025. doi:10.32604/cmes.2025.071571.
 - `[nmfcrnn]` Han, Quan, Matuszewski & Corbett, *Sensors*, 2026. doi:10.3390/s26134268.
-- `[edgelung]` Puneet, Shankar, Koluguri & Srivastava, *IEEE BioCAS*, 2025.
+- `[edgelung]` Puneet, Shankar, Koluguri & Srivastava, "Edge-Enabled Portable Classifier for Lung Sounds Using Convolutional Neural Networks," *IEEE BioCAS*, 2025. doi:10.1109/BioCAS67066.2025.00016.
 - `[ssa]` Han & Quan, *IEEE ICSP*, 2025. doi:10.1109/ICSPS66615.2025.11347745.
 
 One cross-check worth noting: the Edge-Enabled paper's stated HLS-CMDS lung
@@ -90,16 +90,27 @@ this study's design rather than treating as background:
 ## 3. The gap
 
 **The paper this project most directly answers to is Yaqub et al.
-(`[spectrotemporal]`), not the HLS-CMDS-specific papers below it.** Per
-TEEP2026_Sprint0_Review, their experiment 4 reports a classification
-accuracy collapse from 89% (clean heart sounds) to 41% (computationally
-separated heart sounds) — the exact separated-vs-isolated accuracy gap this
-project's research question (§4) is built to measure, on a different
-dataset (PhysioNet 2016) and, per the review, without the leakage-safe
-split this project's own §5.1 was built to guarantee. This memo previously
-filed Yaqub under "no separation, binary classification" and missed this
-entirely — **not yet independently re-confirmed from the primary source
-here**, flagged as an open item in §8.
+(`[spectrotemporal]`), not the HLS-CMDS-specific papers below it.**
+**Resolved from the primary source directly (2026-08-24)** — Yaqub,
+Orakzai, Qureshi, Mushtaq, Siddique & Radwan, *Computer Modeling in
+Engineering & Sciences*, 145(2), 2025, doi:10.32604/cmes.2025.071571: a
+ResNet-18 PCG classifier is trained on PhysioNet 2016, then **externally
+validated on HLS-CMDS itself** (not a different dataset, as this memo
+previously guessed) across four experiments — binary fine-tuning (88.0%),
+4-class fine-tuning (86.0%), full retraining on HLS-CMDS's own 4-class
+labels (89.0%, their best/most balanced result), and a stress test
+(Experiment 4) that re-evaluates the Experiment-3 model on heart sounds
+**computationally separated from HLS-CMDS's own mixed recordings using a
+standard bandpass filter** — where accuracy collapses to 41.0% (Table 9:
+n=5365, weighted F1 0.89→0.39, every class degrades). Their own Discussion
+(§6.2) attributes the collapse specifically to bandpass artifacts on
+spectrally-overlapping signals — the same class of method as this
+project's own Baseline 1, whose separation-quality results (§5.2) already
+show the identical SIR-gain/SAR-cost tradeoff on the separation-quality
+side of exactly this mechanism. This memo previously filed Yaqub under "no
+separation, binary classification" and missed this entirely; that error is
+now corrected here and in `report/report.tex` (Sec. "Related Work"/
+"Yaqub et al."), not just flagged as open.
 
 Of the six HLS-CMDS-adjacent papers, exactly one — **Edge-Enabled Portable
 Lung-Sound Classifier** — evaluates on HLS-CMDS *and* runs a classifier on
@@ -172,6 +183,27 @@ mixtures, and scores SDR/SIR/SAR against the true heart/lung components via
 `metrics.evaluate_dataset`. The harness is method-agnostic
 (`fit_and_separate_fn` is a plug-in), so which method to run is a per-run
 choice, not a blocker.
+
+**Substrate change (2026-08-24, S1-09/S1-10/S1-13):** the per-baseline
+results below (and `results/baselines_report.html`) are native-Mix.csv
+results, kept as-is for history. The **primary evaluation substrate for the
+headline separation-quality table is now the synthetic mixing set**
+(`src/synthetic_mix.py`), not native Mix.csv pairs — only 36/145 native rows
+are additive (§5.1/§8), too few to source a real SDR-vs-difficulty sweep for
+C2's knee-point analysis. The synthetic set matches the native construction
+model exactly (`mixed = a·(heart+lung) + noise`, gain calibrated from the
+36 native rows' own fitted gains — validated in S1-10 to reproduce those 36
+rows under `verify_additive_triplets()`), sweeps additive noise across
+`SNR_SWEEP_DB` for a controllable difficulty axis (diverging from Han &
+Quan's fixed 2% RMS noise level, matching its noise type), and uses a
+source-file-level fold split (S1-13, distinct from S2-03's triplet-level
+split — full combinatorial pairing collapses S2-03's leak-group logic into
+one component). A fifth baseline, **EVMD** (S4-01, see below), was added
+alongside this substrate change. The resulting three-column table (synthetic
+set / native additive rows / Han & Quan's own Table I as a distinct,
+non-recomputed column) is `results/first_sdr_sir_sar_table.html` — see
+`src/first_sdr_table.py` and `code_description.md`'s `synthetic_mix.py` /
+`Baseline 5` sections for full design and construction detail.
 
 **Baseline 1 — simple bandpass filtering (implemented, `src/baselines.py`).**
 The zero-training sanity floor: any learned method that doesn't beat this
@@ -399,6 +431,33 @@ than evidence Baseline 4 is broken generally.
 description, as a fourth separation method; resolving Baseline 4's
 cardiac-side synthetic-set gap (see §8).
 
+**Baseline 5 — EVMD, reproducing `[edgelung]`'s separation stage (S4-01,
+pulled forward from Sprint 4 into Sprint 3; implemented, `src/baselines.py`).**
+Zero-training, like Baselines 1/4. Sweeps VMD (Dragomiretskiy & Zosso 2014,
+implemented directly — no VMD package available) over `K=2..10` at
+`alpha=2000`, selecting the first `K` whose energy-loss coefficient and
+every mode's per-mode check (permutation entropy / frequency band /
+kurtosis-index cascade) clears the paper's own thresholds
+(`mu1=0.01, mu2=0.4, mu3=0.3, mu4=0.05`); isolates the mode with the lowest
+peak frequency as cardiac, lowpasses it at 150 Hz (the paper's cutoff) for
+`heart_est`, subtracts it from the mixture for `lung_est`. **The paper's own
+description of how these four criteria combine is thin** — this project's
+best-faith reading is flagged throughout `code_description.md`'s Baseline 5
+section as interpretation, not confirmed literal reproduction (per the
+project lead's own framing when this baseline was scoped: an exact
+reproduction may not be possible, and documenting where it breaks is a valid
+result). **Measured, not assumed**: the full K-sweep costs ~15 s/mixture
+(dominated by VMD's ADMM iterations at this dataset's 60,000-sample/15 s
+length) — infeasible at the full synthetic-set n within this session's
+timebox, so Baseline 5's synthetic-column result runs on a stratified
+subsample (n stated explicitly in `results/first_sdr_sir_sar_table.html`,
+smaller than the other four baselines' n on the same column — a disclosed
+compute-driven reduction, not a silent one). Its native-additive column
+(n=36) is cheap enough to run in full. `[edgelung]` itself reports no
+SDR/SIR/SAR for this method at all (§2) — Baseline 5 is, as far as this
+project has found, the first separation-quality measurement for it on
+HLS-CMDS.
+
 ### 5.3 Classification (new — not yet built)
 
 Two conditions, same classifier, same fold split:
@@ -473,7 +532,10 @@ predict misclassification even when aggregate accuracy looks fine?
 ## 7. Deliverables
 
 1. Separation-quality table (SDR/SIR/SAR, mean±std across folds) — mechanism
-   already built.
+   already built. **First version landed 2026-08-24** as
+   `results/first_sdr_sir_sar_table.html` (5 methods including the new
+   EVMD baseline; synthetic-set / native-additive / Han & Quan columns, each
+   with n and 95% CI stated — see §5.2's substrate-change note).
 2. Classification-accuracy table, Conditions A vs. B, per fold + aggregate.
 3. Paired delta + significance test.
 4. Separation-quality-vs-accuracy correlation analysis.
@@ -584,9 +646,12 @@ TEEP2026_Sprint0_Review's summary:
   report medians and/or bootstrap CIs alongside means once re-issued, and
   always state which level (per-row vs. per-fold) the dispersion is
   computed at.
-- Independently re-read Yaqub et al. (`[spectrotemporal]`) from the primary
-  source rather than relying on the review's summary of the Reading List —
-  `[nmfcrnn]` and `[ssa]` are now done (see above), Yaqub is not.
+- ~~Independently re-read Yaqub et al. (`[spectrotemporal]`) from the primary
+  source rather than relying on the review's summary of the Reading List~~
+  **Resolved (2026-08-24)** — see §2/§3's now-updated rows and
+  `report/report.tex`'s new "Yaqub et al." subsection. `[nmfcrnn]`, `[ssa]`,
+  and now `[spectrotemporal]` are all independently confirmed from primary
+  sources; `[aidriven]` (a Ph.D. dissertation) remains the one exception.
 - Resolve Baseline 4's cardiac-side reproduction gap (see above) — either by
   refining Stage 1's RC classification criterion or by confirming the paper
   is genuinely silent on this and the gap is inherent to the ambiguity.

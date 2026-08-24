@@ -298,6 +298,18 @@ Generated output dirs (`src/visualization/plots/`,
   low-energy/noise-like RCs relative to whatever more selective criterion
   the paper's "periodic structure analysis" phrase (Sec. II, abstract)
   actually implies but doesn't fully spell out.
+  **Partial data point (2026-08-22):** input SDR (raw mixture vs. each
+  reference, no separation at all) on this project's own 50-pair synthetic
+  set is cardiac -1.12 dB / respiratory +1.46 dB — i.e. this project's
+  synthetic mixes are close to balanced, not heart-dominant. The paper
+  doesn't report a literal unprocessed-input SDR in Table I, so this can't
+  fully confirm "their mixing ratio is heart-dominant enough that their own
+  5.7 dB Butterworth baseline was already most of the way to 26.4 dB" — but
+  it does newly surface that on this project's own data, Baseline 4 (MSSA)
+  barely beats Baseline 1 (bandpass) for cardiac (+2.36 dB vs. +3.32 dB gain
+  over input) despite MSSA being cardiac's specialized stage, which is a
+  more concrete, checkable lead into the Stage-1-too-permissive suspicion
+  above than the asymmetric-gap observation alone.
 - The task that asked for the eval harness referenced "the same
   triplet-level split as S2-03" — this is a real row in the Notion Sprint
   Backlog (per the review), not a missing ticket as previously logged here;
@@ -308,3 +320,237 @@ Generated output dirs (`src/visualization/plots/`,
   `load_dataset.py` like `audio_quality.py` does, so it can't drift from
   the actual data.
 - No CI wiring for the test suite — it only runs when invoked manually.
+
+## Done (2026-08-22 session)
+
+- **`src/report_utils.py`** (new) — shared HTML report building blocks
+  (`report_shell`, `section`, `stat_tile`, `df_to_html`, `image_figure`,
+  `results_dir`, `write_report`), factored out in the same visual style as
+  `load_dataset.py`'s existing `dataset_validation.html`/
+  `mix_pairing_validation.html`.
+- **Consolidated results into a top-level `results/` folder, HTML instead of
+  terminal tables**: `split.py`, `metrics.py`, `eval_harness.py`,
+  `statistics/audio_quality.py`, and `baselines.py`'s `__main__` blocks used
+  to dump long `DataFrame.to_string()` tables straight to the terminal —
+  unreadable once baselines.py alone was printing 4 baselines x 2 subsets x
+  3 tables. Each now prints only short progress lines and writes a
+  self-contained HTML report to `results/` instead (`split_report.html`,
+  `metrics_smoke_test.html`, `eval_harness_smoke_test.html`,
+  `audio_quality_report.html` + its CSVs under
+  `results/audio_quality_reports/`, `baselines_report.html`). The
+  `make baseline1`–`4` one-off Makefile targets got the same treatment via
+  `report_utils.write_cv_report()`.
+- **Visualization scripts wrapped in HTML too**: `audio_plotter.py`,
+  `audio_spectrogram.py` (previously didn't even save its figure — added
+  `fig.savefig()`), `donut_chart.py` (same gap), and `plot_per_class.py` now
+  save their PNGs under `results/plots/` and each writes its own
+  `results/<script>_report.html` embedding them, instead of a bare
+  `plt.show()` (a no-op under the `MPLBACKEND=Agg` headless backend `make
+  plots` already sets).
+- Old scattered output locations (`src/visualization/plots/`,
+  `src/visualization/combined_plots.png`,
+  `src/statistics/audio_quality_reports/`) are gone — removed the stale
+  generated files and updated `.gitignore`/`Makefile`'s `clean` target/
+  `README.md`'s layout tree accordingly. `load_dataset.py`'s own
+  `dataset_validation.html`/`mix_pairing_validation.html` are unchanged
+  (still write to `src/` directly) — out of scope for this pass.
+
+- **Audit of the first real `baselines.py` run surfaced a methodology trap,
+  now fixed** (see the review that prompted this): the full-145-row SDR/SAR
+  numbers aren't measuring separation quality at all, they're dominated by
+  the 109 non-additive rows' residual (every method, including doing
+  nothing, inherits deeply negative SDR/SAR there because a large share of
+  `mixed`'s energy sits outside both references' span). Added
+  **`fit_raw_mixture_baseline`/`raw_mixture_separate`** ("Baseline 0": no
+  separation at all, `est = mixed` for both sources) to `baselines.py` as
+  the reference point every other baseline's SDR now gets compared against,
+  plus a **ΔSDR-vs-Baseline-0 table** in `results/baselines_report.html`
+  (additive-only subset only — the full-145-row axis is flagged
+  non-interpretable in the report's own dek). Confirmed with a real run:
+  on the additive-only 36 rows, Baseline 0 alone already scores heart SDR
+  2.65 dB / lung SDR -2.14 dB (not 0, since even a perfectly-summed mixture
+  isn't literally either reference) — Baseline 1 (bandpass) improves on
+  that by **+2.95 dB heart / +6.08 dB lung**, so the bandpass baseline's
+  effect is real, not just what passthrough already gets. On the full 145
+  rows, Baseline 0 already sits at -13.7/-15.9 dB SDR before any
+  "separation" happens, confirming the full-set numbers reflect the
+  additivity trap, not method quality.
+- **Checked whether `make_standard_nmf_baseline` (Baseline 3)'s
+  heart/lung-component assignment peeks at ground truth** (the suspected
+  explanation for B3 > B2, an ablation-direction surprise) — it doesn't:
+  `baselines.py`'s `is_heart` is computed purely from each component's
+  spectral centroid (`W`, `freqs`), no reference to `heart_ref`/`lung_ref`
+  anywhere in that closure. `metrics.bss_eval`'s `compute_permutation=True`
+  (the other place a 2-source oracle could sneak in) is applied identically
+  to every baseline's evaluation, so it can't explain an asymmetry between
+  B2 and B3 either. The real, code-confirmed asymmetry is what the
+  docstring already said: B3 is **transductive** (fits `W`/`H` fresh on
+  each test mixture's own spectrogram, no generalization needed) while B2
+  is inductive (frozen dictionary fit once per fold on a separate pool) —
+  not ground-truth leakage, but still a real fairness caveat worth keeping
+  next to every B2-vs-B3 comparison.
+- **Tested whether the 109 non-additive rows are actually just
+  desynchronized** (different per-source gain + a small time offset) rather
+  than genuinely unrelated audio: fit two independent gains
+  (`m ≈ a·h + b·l`, least-squares) and, separately, per-source delay
+  alignment via FFT cross-correlation (±200 samples / ±50 ms search
+  window, verified correct — recovers lag 0 on known-additive rows) before
+  refitting. Neither rescues a single one of the 109 rows: relative
+  residual stays at ~0.975–1.0 (99.75–100% of `mixed`'s energy unexplained
+  by any linear combination of heart+lung, gain- and delay-corrected) vs.
+  ~1e-8–1e-4 on the 36 genuinely additive rows. This is a clean negative
+  result — it rules out "just needs realignment" and reinforces that the
+  109 rows are acoustically unrelated files, not a synchronization bug.
+
+## Done (2026-08-24 session)
+
+- **`src/synthetic_mix.py`** (new) — synthetic mixing set (S1-09/S1-10/S1-13),
+  now the primary evaluation substrate for the headline separation-quality
+  table (only 36/145 native Mix.csv rows are additive — too few to source a
+  real SDR-vs-difficulty sweep for the charter's C2 knee-point analysis).
+  Construction matches the native dataset's own model
+  (`mixed = a*(heart+lung) + noise`, gain calibrated from the 36 native
+  rows' own fitted gains via `verify_additive_triplets`), sweeps additive
+  Gaussian noise across `SNR_SWEEP_DB = (-5, 15, 35)` dB for a controllable
+  difficulty axis (diverging from Han & Quan's fixed 2% RMS level, matching
+  their noise type — trimmed from an originally-planned 5 levels to 3 after
+  measured per-row cost across all 5 baselines showed a 5-level sweep would
+  make the full run multi-hour). Split is source-file-level (S1-13,
+  `assign_source_folds`), not triplet-level (S2-03) — full combinatorial
+  pairing over HS.csv x LS.csv collapses S2-03's leak-group logic into one
+  giant component, so it moves up to assigning each of the 50 heart/50 lung
+  files independently to a fold, with a synthetic pair only used for
+  held-out evaluation when both sources share the held-out fold. 1500 total
+  rows (500 leakage-safe same-fold pairs x 3 SNR levels).
+
+  **S1-10 validation**: `validate_against_native()` applies this exact
+  construction (each native row's own real audio + its own fitted gain,
+  zero noise) to the 36 native additive rows and re-runs
+  `load_dataset.verify_additive_triplets()` itself (reused directly, not
+  reimplemented) against the result. All 36/36 reproduce, with residuals
+  landing in the same ~1e-4 cluster the genuine native rows occupy (not
+  just barely under the pass/fail threshold) — real evidence the synthetic
+  substrate is faithful to the dataset's own additive mixtures, not an
+  arbitrary process.
+
+  `src/test_synthetic_mix.py` (new, 17 tests): source-file fold-safety
+  (mirrors `test_split.py`'s load-bearing leakage test — no heart/lung file
+  shared between a fold's dictionary pool and that fold's held-out pairs),
+  provenance completeness, reproducibility, and the S1-10 validation
+  assertion. All passing.
+
+- **Baseline 5: EVMD** (S4-01, pulled forward from Sprint 4 into Sprint 3,
+  same pull-forward pattern as Baseline 3's S3-03), reproducing the
+  separation stage of Puneet, Shankar, Koluguri & Srivastava, "Edge-Enabled
+  Portable Classifier for Lung Sounds Using Convolutional Neural Networks,"
+  IEEE BioCAS 2025 (`papers/Edge-Enabled_Portable_Classifier_for_Lung_
+  Sounds_Using_Convolutional_Neural_Networks.pdf`). That paper runs EVMD
+  directly on HLS-CMDS mixtures but reports no separation metric at all —
+  Baseline 5 is the first SDR/SIR/SAR measurement for it on this dataset.
+  Zero-training (no dictionary/leakage trap, like Baselines 1/4). VMD
+  itself implemented directly (no package available/installed) via
+  frequency-domain ADMM; the K=2..10 selection sweep (`alpha=2000`,
+  `mu1..mu4` thresholds) follows the paper's own stated values, with the
+  criteria-combination logic flagged throughout `code_description.md` as
+  this project's best-faith interpretation — the paper's own description is
+  admittedly thin here, matching the project lead's own framing when this
+  baseline was scoped ("an exact reproduction may not be possible... write
+  up what you tried and where it broke"). Also corrects a related-work
+  mischaracterization in PROTOCOL.md: `[edgelung]`'s edge hardware is a
+  PYNQ-ZU **FPGA board** (~15 W), not an MCU — the ESP32 only handles
+  acquisition.
+
+  **Measured, not assumed**: the full K-sweep costs ~15s/mixture at this
+  dataset's 15s/4000Hz recordings, dominated by VMD's ADMM iterations —
+  infeasible at the full synthetic-set n within this session's timebox
+  (~6 hours extrapolated). Baseline 5's synthetic-set column in the table
+  below runs on a stratified subsample (n stated explicitly in the report,
+  smaller than the other 4 baselines' n on the same column — a disclosed
+  compute-driven reduction, not a silent one); its native-additive column
+  (n=36) runs in full. `src/test_baselines.py` (new, 6 tests): VMD
+  reconstruction-fidelity and permutation-entropy sanity checks (not an
+  attempt to re-verify the paper's own ambiguous K-selection semantics,
+  already flagged as interpretation). All passing.
+
+  **K-selection convergence, checked directly (not assumed)**: sampled 9
+  real mixtures (6 synthetic across the SNR sweep, 3 native additive) and
+  logged whether `_evmd_select_k` actually found a `K` satisfying every one
+  of the paper's stated criteria. Only **2/9 converged** (both native, both
+  at `K=2`); every synthetic-set sample and one native sample fell back to
+  the `K=10` ceiling. This is exactly the outcome flagged as possible when
+  this baseline was scoped -- the paper's mu1-mu4 cascade, under this
+  project's best-faith reading, rarely resolves cleanly. The separation
+  itself still runs at the fallback `K` and produces real signal estimates
+  (this is what the SDR/SIR/SAR table reports), but "K=10 was used because
+  nothing else satisfied the paper's criteria" is a materially different
+  claim than "K was found optimal" -- worth stating plainly rather than
+  letting the table's numbers imply the reproduction is cleaner than it is.
+
+- **`src/first_sdr_table.py`** (new) — the first SDR/SIR/SAR table across
+  all 5 baselines, three columns per (baseline, source): the synthetic set
+  (n=1500, or Baseline 5's smaller subsample), the 36 native additive rows,
+  and Han & Quan's own Table I (confirmed directly from the primary source
+  this session — includes the paper's NMF-baseline row, not just Butterworth/
+  MSSA) as a static, non-recomputed column marked as their setup. Every
+  computed cell states mean, 95% CI, and n explicitly, so the synthetic
+  column's tight CI (large n) is never confused with the native column's
+  wider CI (n=36) — per the brief that a tight interval on synthetic data
+  and a tight interval on native pairs are not the same claim. Output:
+  `results/first_sdr_sir_sar_table.html`. Full run launched in the
+  background this session (~1-2 hours, dominated by Baselines 4/5's
+  per-row cost at synthetic scale) — see the report itself for the actual
+  numbers and interpretation once it completes.
+
+- **`Makefile`**: new `synthetic-set`, `baseline5`, `first-sdr-table`
+  targets, matching the existing `baseline1`–`4`/`baselines` pattern.
+
+- **`src/baseline12_synthetic_report.py`** (new) — a focused re-run of
+  Baselines 1 (bandpass, S3-01) and 2 (supervised NMF, S3-02) on the
+  synthetic set specifically, native additive rows (n=36) alongside as a
+  secondary column (no Han & Quan column here — that's the full
+  `first_sdr_table.py` table's job). Both implementations are unchanged;
+  only the evaluation substrate is new, so this reuses
+  `synthetic_mix.evaluate_synthetic`/`eval_harness.cross_validate` directly,
+  no new baseline code. `make baseline12-synthetic` ->
+  `results/baseline1_2_synthetic_report.html`.
+
+- **Additive-mixture forensics**: confirmed the 36 native additive rows are
+  computed sums, not acoustic recordings — two checks on raw int16 samples
+  (not the normalized floats `verify_additive_triplets` uses). (1) Residual
+  (`mixed − a·(heart+lung)`) is bounded to a handful of LSBs in every row
+  (mean RMS 0.48 LSB, max 2.1–10.5 LSB) — categorically inconsistent with
+  real acoustic capture (which would show residual on the order of the
+  signal's own dynamic range), but ~1.65× the theoretical single-rounding
+  floor (0.289 LSB), pointing to at least two compounded integer-rounding
+  steps in construction, not one. (2) Gain `a` fit per 1.5s sub-segment is
+  flat within every row (mean CV 0.0074%, max 0.029%) — no real drift, only
+  short-window estimation noise. Together: solid evidence for "no
+  acoustically-native mixtures, these are computed sums," with the one
+  honest caveat that the exact construction formula involved more than a
+  single rounding operation.
+
+- **Report/citation audit** (`report/report.tex`, `PROTOCOL.md`): fixed 4
+  of report.tex's "[Author(s) needed]" bibliography placeholders
+  (`aidriven`, `spectrotemporal`, `edgelung`, `ssa` — `nmfcrnn` already had
+  full details) using the Notion Reading List's citations, cross-checked
+  against primary-source PDFs already in `papers/` for 3 of the 4
+  (`aidriven`'s Ph.D. dissertation remains uncross-checked). Independently
+  read Yaqub et al. (`[spectrotemporal]`) in full — report.tex's related-work
+  table had it filed as "PhysioNet 2016, no separation, binary
+  normal/abnormal classification," which was wrong on every count: the
+  paper externally validates its classifier **on HLS-CMDS itself**, and its
+  Experiment 4 stress test — heart sounds computationally separated from
+  HLS-CMDS's own mixed recordings via a **standard bandpass filter** (same
+  method class as this project's own Baseline 1) — is the source of the
+  89.0%→41.0% accuracy collapse (Table 9: n=5365) that is the single result
+  this whole project exists to explain. Rewrote report.tex's related-work
+  table row and added a dedicated subsection making this explicit, plus
+  updated the Introduction to cite Yaqub as the motivating result rather
+  than stating the research question as purely rhetorical. Mirrored the
+  same corrections into `PROTOCOL.md` §2/§3/§8, which had partially caught
+  this in an earlier session (2026-08-18, from the review's summary) but
+  explicitly flagged itself as "not yet independently confirmed from the
+  primary source" until now. No LaTeX toolchain is available in this
+  environment (`pdflatex`/`latexmk` not installed) — `report.tex` is
+  updated but `report.pdf` was not regenerated; needs a local/Overleaf
+  rebuild.

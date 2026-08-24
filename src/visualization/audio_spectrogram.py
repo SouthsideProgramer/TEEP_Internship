@@ -1,12 +1,8 @@
 """
 Mel-Spectrogram Plotter
 
-This Python script plots the Mel-spectrograms of multiple audio files using `librosa` and `matplotlib`. It processes audio files, generates Mel-spectrograms, and displays them in a vertically oriented figure.
-
-## Features:
-- Generate and plot Mel-spectrograms for multiple audio files.
-- Customize frequency range and Mel band limits.
-- Include a color bar for better interpretation of dB scale values.
+Plots the Mel-spectrograms of multiple audio files using `librosa` and
+`matplotlib`. See code_description.md for the feature list.
 
 ## Citation:
 If you use this code or the associated dataset in your research, please cite the following paper:
@@ -27,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
 from load_dataset import load_hs, load_ls
 
 
@@ -90,5 +86,32 @@ def plot_mel_spectrograms(audio_files):
 
 
 if __name__ == "__main__":
-    plot_mel_spectrograms(_example_rows())
-    plt.show()
+    from report_utils import image_figure, report_shell, results_dir, section, write_report
+
+    examples = _example_rows()
+    titles = [title for _path, title in examples]
+
+    print(f"Plotting mel-spectrograms for {len(examples)} example recordings...")
+    plots_dir = results_dir() / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    output_path = plots_dir / "spectrogram_examples.png"
+
+    fig = plot_mel_spectrograms(examples)
+    fig.savefig(output_path, dpi=120)
+    plt.close(fig)
+
+    html = report_shell(
+        title="Mel-Spectrogram Examples",
+        eyebrow="HLS-CMDS · audio_spectrogram.py",
+        heading="Example heart/lung mel-spectrograms",
+        dek="Mel-spectrograms for the same three illustrative recordings as audio_plotter.py's waveform report.",
+        stat_tiles="",
+        body=section(
+            "Mel-spectrograms",
+            ", ".join(titles),
+            image_figure(f"plots/{output_path.name}", ", ".join(titles)),
+        ),
+        footer="<p><strong>Method.</strong> See <code>audio_spectrogram.py</code>'s <code>plot_mel_spectrograms()</code>.</p>",
+    )
+    report_path = write_report(results_dir() / "audio_spectrogram_report.html", html)
+    print(f"Report written to {report_path}")

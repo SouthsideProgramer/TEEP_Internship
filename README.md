@@ -5,27 +5,35 @@
 ```
 thang/
 ├── HLS_CMDS/            # dataset (Heart and Lung Sounds Dataset), {HS,LS,Mix}/ audio + CSVs
+├── results/             # generated HTML reports + plots (gitignored) -- see below
 ├── src/                 # analysis scripts, kept outside HLS_CMDS so they aren't tied to that repo
 │   ├── load_dataset.py      # loads HS/LS/Mix CSVs, resolves + validates audio paths
+│   ├── report_utils.py       # shared HTML report building blocks for results/
 │   ├── metrics.py            # BSS Eval (SDR/SIR/SAR) for heart/lung separation
 │   ├── split.py               # leakage-safe, triplet-level fold assignment
 │   ├── eval_harness.py        # k-fold cross-validation wiring split.py + metrics.py
+│   ├── baselines.py           # separation baselines (bandpass, NMF x2, SSA)
 │   ├── test_metrics.py, test_split.py, test_load_dataset.py
 │   ├── visualization/        # plotting scripts
 │   │   ├── audio_plotter.py       # waveforms for 3 illustrative recordings pulled from HS.csv/LS.csv
 │   │   ├── audio_spectrogram.py   # mel-spectrograms for the same 3 example files
 │   │   ├── donut_chart.py         # sound-type donut chart, no dataset files needed
-│   │   ├── plot_per_class.py      # waveform/spectrogram grid, one file per class
-│   │   └── plots/                 # generated PNGs (gitignored)
+│   │   └── plot_per_class.py      # waveform/spectrogram grid, one file per class
 │   └── statistics/           # dataset/audio statistics
-│       ├── audio_quality.py       # duration/sample-rate/clipping, per class + location
-│       └── audio_quality_reports/ # generated CSVs (gitignored)
+│       └── audio_quality.py       # duration/sample-rate/clipping, per class + location
 └── requirements.txt     # pinned deps for the audio_env conda environment
 ```
 
 `src/visualization/*.py` and `src/statistics/audio_quality.py` resolve dataset/example paths relative
 to their own location, so they only work with this exact layout — `src/`, `src/visualization/`,
 `src/statistics/`, and `HLS_CMDS/` must keep their relative positions under `thang/`.
+
+Every script above prints only short progress lines to the terminal; its actual results (tables,
+plots) are rendered as a self-contained HTML file under `results/` (e.g. `results/baselines_report.html`,
+`results/split_report.html`), with generated PNGs under `results/plots/` and `audio_quality.py`'s CSVs
+under `results/audio_quality_reports/`. `results/` is gitignored — run `make <target>` and open the
+HTML file in a browser. `load_dataset.py`'s own validation reports (`dataset_validation.html`,
+`mix_pairing_validation.html`) still write to `src/` directly (unchanged, pre-existing behavior).
 
 ## Dataset
 

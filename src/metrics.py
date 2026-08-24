@@ -1,10 +1,8 @@
 """
 BSS Eval separation metrics (SDR / SIR / SAR) for the heart/lung mix set.
 
-Thin wrapper around `mir_eval.separation.bss_eval_sources` [Vincent et al.,
-2006], specialized for this dataset's 2-source case: every Mix.csv row mixes
-one heart recording and one lung recording, so a separation model's output
-is evaluated against those two ground-truth sources.
+See code_description.md for details on the mir_eval wrapper and why the
+FutureWarning below is silenced.
 
 Usage:
     from metrics import evaluate_heart_lung, evaluate_dataset
@@ -23,11 +21,6 @@ import pandas as pd
 from mir_eval.separation import bss_eval_sources
 
 from load_dataset import load_audio, load_mix
-
-# mir_eval 0.8 deprecated bss_eval_sources/_images in favor of a museval-style
-# API that isn't published yet; bss_eval_sources is still the correct,
-# actively-used implementation of the classic Vincent et al. 2006 metric, so
-# silence the (currently unactionable) FutureWarning it raises on every call.
 
 SOURCE_LABELS = ("heart", "lung")
 
@@ -128,9 +121,12 @@ def summarize_by_class(results_df: pd.DataFrame, source: str, class_col: str) ->
 
 
 if __name__ == "__main__":
+    from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
+
     # Smoke test against real dataset audio: two baselines with known-sane behavior.
     #   - identity separation (est == ref)   -> SDR/SIR/SAR should be very high (~inf)
     #   - mixed signal used as both estimates -> SDR should be low/negative (no separation at all)
+    print("Running metrics smoke test against real dataset audio...")
     mix_df = load_mix()
     row = mix_df.iloc[0]
     heart_ref, sr = load_audio(row["heart_audio_path"], sr=None)
@@ -142,16 +138,44 @@ if __name__ == "__main__":
     def no_separation(mixed, sr):
         return mixed, mixed
 
-    print(f"Row: {row['Mixed Sound ID']} ({row['Heart Sound Type']} + {row['Lung Sound Type']})\n")
+    def _metrics_df(m: dict) -> pd.DataFrame:
+        return pd.DataFrame([{"source": s, **m[s]} for s in SOURCE_LABELS]).set_index("source")
 
-    print("Baseline: identity (est == ref)")
-    for source, m in evaluate_mix_row(row, identity_separate).items():
-        if source == "mixed_id":
-            continue
-        print(f"  {source}: SDR={m['sdr']:.1f} dB  SIR={m['sir']:.1f} dB  SAR={m['sar']:.1f} dB")
+    identity_metrics = evaluate_mix_row(row, identity_separate)
+    no_sep_metrics = evaluate_mix_row(row, no_separation)
 
-    print("\nBaseline: no separation (est == mixed for both sources)")
-    for source, m in evaluate_mix_row(row, no_separation).items():
-        if source == "mixed_id":
-            continue
-        print(f"  {source}: SDR={m['sdr']:.1f} dB  SIR={m['sir']:.1f} dB  SAR={m['sar']:.1f} dB")
+    stat_tiles = "\n".join([
+        stat_tile("Test row", str(row["Mixed Sound ID"]), "Mixed Sound ID"),
+        stat_tile("Heart type", row["Heart Sound Type"], ""),
+        stat_tile("Lung type", row["Lung Sound Type"], ""),
+    ])
+
+    body = "\n\n".join([
+        section(
+            "Identity separation (est == ref)",
+            "expected: very high SDR/SIR/SAR",
+            df_to_html(_metrics_df(identity_metrics), index_label="source", float_fmt="{:.1f}"),
+        ),
+        section(
+            "No separation (est == mixed for both)",
+            "expected: low/negative SDR",
+            df_to_html(_metrics_df(no_sep_metrics), index_label="source", float_fmt="{:.1f}"),
+        ),
+    ])
+
+    html = report_shell(
+        title="Metrics Smoke Test",
+        eyebrow="HLS-CMDS · BSS Eval sanity check",
+        heading="Identity vs. no-separation baseline",
+        dek=(
+            "Two known-sane behaviors on one real Mix.csv row: identity separation "
+            "should score near-perfect SDR/SIR/SAR, no separation at all should score "
+            "low/negative SDR."
+        ),
+        stat_tiles=stat_tiles,
+        body=body,
+        footer="<p><strong>Method.</strong> See <code>metrics.py</code>'s <code>evaluate_mix_row()</code>.</p>",
+    )
+
+    report_path = write_report(results_dir() / "metrics_smoke_test.html", html)
+    print(f"Report written to {report_path}")
