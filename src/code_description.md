@@ -7,8 +7,24 @@ file paths.
 
 ## baselines.py
 
-Baseline separation methods for the heart/lung mix set -- the "does the real
-method even beat a filter" sanity floor referenced in PROTOCOL.md 5.2/8.
+Baseline 0 (raw mixture, no separation -- the reference every other
+baseline's SDR is read against) plus the report-generation glue that ties
+Baselines 0-4 together into `results/baselines_report.html` and builds the
+SSA-paper-style synthetic evaluation set. Baselines 1-5 each live in their
+own module under `baseline/` (split out of what used to be one large
+baselines.py -- see below); Baseline 6 lives in `convtasnet.py`.
+
+## baseline/common.py
+
+The handful of pieces literally reused by more than one baseline: the two
+frequency bands (`HEART_BAND`, `LUNG_BAND`), the zero-phase Butterworth
+bandpass (`_bandpass`), and Welch-PSD peak-frequency picking
+(`_peak_frequency`). Anything used by only one baseline stays defined in
+that baseline's own module -- see baseline3.py below for the one exception
+(it imports Baseline 2's NMF machinery directly rather than duplicating it,
+since it's explicitly an ablation of Baseline 2).
+
+## baseline/baseline1.py
 
 **Baseline 1: simple bandpass filtering.** Zero-training, non-adaptive: a fixed
 Butterworth bandpass per source, applied identically to every mixture. Any
@@ -23,6 +39,8 @@ heart/lung bands below therefore overlap on purpose in the 150-200 Hz
 region -- that overlap is real (both sources have genuine energy there) and
 is exactly the "spectral overlap" failure mode this baseline is meant to
 demonstrate, not an implementation bug.
+
+## baseline/baseline2.py
 
 **Baseline 2: supervised NMF**, adapting Han, Quan, Matuszewski & Corbett,
 "Respiratory Disease Classification Using NMF-Enhanced Log-Mel Spectrograms
@@ -68,7 +86,9 @@ purpose from Baseline 1's per-source 20-200/150-1000 Hz bands (which *are*
 the separation, not a pre-filter for one). Added here (`DENOISE_BAND`,
 applied in `_fit_dictionary` and both `separate()` closures in baselines.py)
 to match the paper's actual pipeline order, not just its NMF math -- the
-initial reproduction skipped this stage entirely.
+initial reproduction skipped this stage entirely. (`DENOISE_BAND` and the
+NMF machinery now live in `baseline/baseline2.py`; `baseline/baseline3.py`
+imports them directly rather than duplicating -- see below.)
 
 LEAKAGE TRAP (see PROTOCOL.md 5.1/split.py): a third of HS.csv/LS.csv's
 recordings are byte-identical to a heart/lung component of some Mix.csv
@@ -81,6 +101,8 @@ mixtures already excluded (same triplet-level split as S2-03) -- so its
 score is expected to come in lower than a naive reproduction's. That lower
 number is the correct one; a higher one would mean leakage, not a better
 model.
+
+## baseline/baseline3.py
 
 **Baseline 3: standard NMF**, no learned dictionary (ablation against Baseline 2 /
 S3-02; ref S3-03). Same total rank (Ki+Kr=30), STFT params, and DENOISE_BAND
@@ -97,6 +119,8 @@ unlabeled by construction; they're assigned to heart/lung post-hoc by
 spectral centroid (heart energy concentrated below ~200 Hz, per Baseline 1's
 own PSD survey) -- a fixed physical prior, not a source label, so the method
 stays genuinely blind.
+
+## baseline/baseline4.py
 
 **Baseline 4: multi-stage Singular Spectrum Analysis (MSSA)**, reproducing Han &
 Quan, "Cardiorespiratory Sound Separation Using Singular Spectrum Analysis,"
@@ -148,6 +172,8 @@ Two-stage algorithm (Sec. II.A "Basic Algorithm" for the SSA math, II.B
   flagged here the same way Baseline 2's two-sided-mask extension is
   flagged as this project's own interpretation, not literal paper text.)
 
+## baseline/baseline5.py
+
 **Baseline 5: EVMD (Enhanced Variational Mode Decomposition)**, reproducing
 Sec. II.B of Puneet, Shankar, Koluguri & Srivastava, "Edge-Enabled Portable
 Classifier for Lung Sounds Using Convolutional Neural Networks," IEEE
@@ -169,7 +195,7 @@ in `requirements.txt`, so this is implemented directly, the same way
 Baseline 4's SSA was implemented from scratch. Standard frequency-domain
 ADMM solve with mirror-padding at both signal ends (suppresses boundary
 artifacts in the mode estimates, standard VMD practice). This part is fully
-specified by the cited paper and not in question -- `test_baselines.py`
+specified by the cited paper and not in question -- `test/test_baseline5.py`
 checks its reconstruction fidelity directly.
 
 **K-selection (Sec. II.B, `_evmd_select_k`)**: sweeps `K=2..10` at
@@ -233,6 +259,73 @@ synthetic-set column on a stratified subsample rather than the full
 synthetic set every other baseline uses -- see that script and
 `synthetic_mix.py` below.
 
+## convtasnet.py
+
+**Baseline 6: Conv-TasNet-lite** -- the first neural, end-to-end learned
+separation baseline. Lives here rather than under `baseline/` since it's a
+different kind of module (trains a model) rather than a fixed
+separate_fn/fit_fn pair. See this module's own docstring for the full
+sample-rate decision and architecture derivation; summarized here.
+
+*Sample-rate decision*, made explicitly before any training code was
+written: this dataset is natively 4000 Hz, so public Conv-TasNet/Sepformer
+checkpoints (trained at 8-16 kHz) don't apply without resampling, and
+resampling up invents no real information. Decision: train from scratch at
+the native 4000 Hz. This is not a resolution limitation for this task --
+heart energy sits at 20-200 Hz and lung at 100-1000 Hz (Baseline 1's own
+Welch-PSD survey), comfortably under 4 kHz's 2000 Hz Nyquist.
+
+*Architecture*: the same encoder/TCN-separator/decoder design as Conv-TasNet
+itself (Luo & Mesgarani, IEEE/ACM TASLP 2019) and NeoSSNet (Poh et al., IEEE
+OJEMB 2024 -- the closest prior work: also a masked Conv-TasNet-style model
+separating heart/lung sound from one chest channel at 4 kHz), sized down
+("lite") for this dataset's much smaller training pool: ~325K parameters vs.
+Conv-TasNet's own ~5M-parameter speech config or NeoSSNet's 8.4M-parameter
+transformer-augmented model. No transformer mask generator (NeoSSNet's own
+addition) -- just the original stacked-dilated-TCN separator. Sigmoid mask
+activation per source, independent (no unit-sum constraint) -- Conv-TasNet's
+own ablation (Sec. IV-A) found sigmoid at least as good as a softmax
+constraint, and this dataset's mixtures have a real noise/residual
+component so heart+lung need not reconstruct the mixture exactly (see
+`load_dataset.verify_additive_triplets`). Fixed source order (heart =
+channel 0, lung = channel 1), not permutation-invariant training --
+unlike Conv-TasNet's interchangeable speakers, heart and lung are
+distinguishable classes here, matching NeoSSNet's own (non-PIT) choice.
+
+*Training loop*: unlike Baselines 1-5 (zero-training or a fixed-dictionary
+fit), this baseline trains a fresh network per fold from that fold's
+leakage-safe `hs_allowed`/`ls_allowed` pool (same contract every baseline's
+`fit_and_separate_fn` receives). Since Conv-TasNet needs paired (mixed,
+heart, lung) examples rather than a spectral dictionary, training mixtures
+are synthesized on the fly, reusing `synthetic_mix.py`'s own mixing recipe
+(`mixed = a*(heart+lung) + noise`, gain log-uniform over the native-additive
+gain range, noise drawn to a uniformly-sampled target SNR within
+`SNR_SWEEP_DB`'s range) rather than inventing a separate one -- keeps
+train-time mixtures drawn from the same distribution the model is evaluated
+against. A file-level 80/20 split inside the allowed pool (never touching
+the outer CV fold's held-out data) gives an internal validation set for
+early stopping and LR scheduling (AdamW, LR halved after 4 epochs without
+validation-SI-SDR improvement, best-checkpoint restore -- matching
+NeoSSNet's own training recipe) rather than just returning the final
+epoch's weights.
+
+*Honest scope*: this is the first neural baseline, establishing the
+training-loop infrastructure -- not a tuned, converged model. The dataset's
+~50 recordings/class (fewer per fold once leakage exclusions apply) is
+small for a from-scratch neural separator even with on-the-fly mixing
+augmentation; `baseline6_report.py` prints each fold's actual training
+diagnostics (epochs run, best validation SI-SDR, train/val pool sizes) and
+measured wall-clock rather than assuming the shipped config
+(`MAX_EPOCHS=25`, `STEPS_PER_EPOCH=40`, `BATCH_SIZE=8`) trained to
+convergence.
+
+`test/test_convtasnet.py` (12 tests): model forward-pass shape/finiteness
+for arbitrary input lengths, SI-SDR loss sanity (scale invariance, identity
+ceiling, uncorrelated-estimate floor), the augmented-batch sampler's output
+shapes, and an end-to-end training-loop smoke test (tiny synthetic pool,
+few epochs) that the `fit_and_separate_fn` contract actually works and a
+too-small allowed pool raises rather than silently training on nothing.
+
 ## synthetic_mix.py
 
 Synthetic mixing set (S1-09/S1-10/S1-13) -- replaces native Mix.csv pairs
@@ -279,7 +372,7 @@ only used for held-out evaluation under fold `k` when
 on, not just one.
 
 **Provenance**: every row records `heart_id`, `lung_id`, `gain_a`,
-`snr_db`, `fold` -- required for the leakage tests in `test_synthetic_mix.py`
+`snr_db`, `fold` -- required for the leakage tests in `test/test_synthetic_mix.py`
 and so the generator itself is auditable. Audio arrays are *not* stored in
 the provenance table (`build_synthetic_set` returns scalars only); rows are
 synthesized on demand (`synthesize_row`) from a small (50+50 recording)

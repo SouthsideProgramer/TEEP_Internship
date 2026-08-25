@@ -12,8 +12,10 @@ thang/
 │   ├── metrics.py            # BSS Eval (SDR/SIR/SAR) for heart/lung separation
 │   ├── split.py               # leakage-safe, triplet-level fold assignment
 │   ├── eval_harness.py        # k-fold cross-validation wiring split.py + metrics.py
-│   ├── baselines.py           # separation baselines (bandpass, NMF x2, SSA)
-│   ├── test_metrics.py, test_split.py, test_load_dataset.py
+│   ├── baselines.py           # Baseline 0 (raw mixture) + report-generation glue
+│   ├── baseline/               # Baselines 1-5, one module each (bandpass, NMF x2, SSA, EVMD)
+│   ├── convtasnet.py           # Baseline 6 (Conv-TasNet-lite, first neural model)
+│   ├── test/                   # test_metrics.py, test_split.py, test_load_dataset.py, etc.
 │   ├── visualization/        # plotting scripts
 │   │   ├── audio_plotter.py       # waveforms for 3 illustrative recordings pulled from HS.csv/LS.csv
 │   │   ├── audio_spectrogram.py   # mel-spectrograms for the same 3 example files

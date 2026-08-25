@@ -205,7 +205,7 @@ non-recomputed column) is `results/first_sdr_sir_sar_table.html` — see
 `src/first_sdr_table.py` and `code_description.md`'s `synthetic_mix.py` /
 `Baseline 5` sections for full design and construction detail.
 
-**Baseline 1 — simple bandpass filtering (implemented, `src/baselines.py`).**
+**Baseline 1 — simple bandpass filtering (implemented, `src/baseline/baseline1.py`).**
 The zero-training sanity floor: any learned method that doesn't beat this
 has a bug, not just a hard problem. Cutoffs were derived from this
 dataset's own isolated recordings rather than borrowed from literature
@@ -242,7 +242,7 @@ in §2: SDR alone would have made bandpass look like a bigger win than it is.
 Matuszewski & Corbett, *Sensors*, 2026, doi:10.3390/s26134268; now
 **cross-checked directly against `papers/Respiratory_Disease_Classification_..._pdf`,
 Sec. 3.2.1–3.2.4** — the earlier hedge here is resolved) (implemented,
-`src/baselines.py`).** Two fixed dictionaries, one per source, learned from
+`src/baseline/baseline2.py`).** Two fixed dictionaries, one per source, learned from
 isolated H/L recordings via KL-divergence multiplicative-update NMF, then
 frozen and used to solve for per-mixture activations (the classic
 supervised-NMF separation recipe, Smaragdis 2007). Hyperparameters, all
@@ -258,11 +258,12 @@ every snippet — both dictionary-training recordings and the mixture being
 separated — with a 4th-order Butterworth bandpass (50–1800 Hz) *before*
 STFT/NMF (Sec. 3.2.1), to strip baseline drift and acquisition noise; this
 project's initial reproduction skipped that stage entirely. Now added
-(`DENOISE_BAND` in `src/baselines.py`), applied identically to Baseline 3
-(§ below) so the two stay a controlled ablation of each other. Separation
+(`DENOISE_BAND` in `src/baseline/baseline2.py`), applied identically to Baseline 3
+(§ below, which imports it directly rather than duplicating it) so the two
+stay a controlled ablation of each other. Separation
 extends the paper's own single-sided respiratory-only reconstruction to a
 symmetric two-source mask (the paper never reconstructs or evaluates the
-heart/interference side at all — see `src/baselines.py`'s docstring for the
+heart/interference side at all — see `src/baseline/baseline2.py`'s docstring for the
 full adaptation note). The `[nmfcrnn]` dataset discrepancy flagged in §2's
 table is now resolved, also from the primary source: HLS-CMDS isolated
 recordings are the auxiliary dictionary-learning corpus (exactly this
@@ -319,7 +320,7 @@ only Baseline 1/3 had been re-run there) — see Baseline 3 immediately below
 for the apples-to-apples ablation this unlocks.
 
 **Baseline 3 — standard NMF, no learned dictionary (ablation against
-Baseline 2; ref S3-03, `src/baselines.py`, `make_standard_nmf_baseline`).**
+Baseline 2; ref S3-03, `src/baseline/baseline3.py`, `make_standard_nmf_baseline`).**
 Same total rank (Ki+Kr=30), STFT params, and denoising pre-filter as
 Baseline 2, but W and H are both factorized directly out of each held-out
 mixture's own spectrogram — no dictionary-learning phase, so
@@ -351,7 +352,7 @@ result, but it's a real, reproducible finding, not a sanity-check artifact.
 **Baseline 4 — multi-stage SSA (MSSA), reproducing `[ssa]` (Han & Quan,
 *2025 ICSPS*, doi:10.1109/ICSPS66615.2025.11347745; cross-checked directly
 against `papers/Cardiorespiratory_Sound_Separation_Using_Singular_Spectrum_
-Analysis.pdf`, Sec. II) (implemented, `src/baselines.py`,
+Analysis.pdf`, Sec. II) (implemented, `src/baseline/baseline4.py`,
 `fit_ssa_baseline`/`mssa_separate`).** Zero-training, two-stage decomposition
 applied identically to every mixture — no dictionary or fold-fitting step,
 so `hs_allowed`/`ls_allowed` go unused and there is no leakage trap to speak
@@ -378,7 +379,7 @@ Stage 2 (respiratory) selects RCs whose relative eigenvalue contribution
 clears the 2% threshold, then adds any remaining RC whose Pearson
 correlation with that selected set's sum exceeds 50% — an interpretation
 choice, since the paper doesn't fully spell out what "the remaining modes"
-are correlated against; flagged in `src/baselines.py`'s docstring as this
+are correlated against; flagged in `src/baseline/baseline4.py`'s docstring as this
 project's own reading, same as Baseline 2's two-sided-mask extension is
 flagged.
 
@@ -432,7 +433,7 @@ description, as a fourth separation method; resolving Baseline 4's
 cardiac-side synthetic-set gap (see §8).
 
 **Baseline 5 — EVMD, reproducing `[edgelung]`'s separation stage (S4-01,
-pulled forward from Sprint 4 into Sprint 3; implemented, `src/baselines.py`).**
+pulled forward from Sprint 4 into Sprint 3; implemented, `src/baseline/baseline5.py`).**
 Zero-training, like Baselines 1/4. Sweeps VMD (Dragomiretskiy & Zosso 2014,
 implemented directly — no VMD package available) over `K=2..10` at
 `alpha=2000`, selecting the first `K` whose energy-loss coefficient and
@@ -457,6 +458,43 @@ compute-driven reduction, not a silent one). Its native-additive column
 SDR/SIR/SAR for this method at all (§2) — Baseline 5 is, as far as this
 project has found, the first separation-quality measurement for it on
 HLS-CMDS.
+
+**Baseline 6 — Conv-TasNet-lite, the first neural separation baseline
+(implemented, `src/convtasnet.py`).** Unlike Baselines 1-5 (zero-training or
+a fixed-dictionary fit), this trains a fresh encoder/TCN-separator/decoder
+network per fold from that fold's own leakage-safe dictionary pool, on
+mixtures synthesized on the fly using `synthetic_mix.py`'s own mixing
+recipe. **Sample-rate decision** (made explicitly before writing any
+training code, since public Conv-TasNet/Sepformer checkpoints are trained
+at 8-16 kHz and this dataset is natively 4000 Hz): train from scratch at
+the native 4 kHz rather than resample up, which would invent no real
+information. This is not a resolution limitation — heart (20-200 Hz) and
+lung (100-1000 Hz) sit comfortably under 4 kHz's 2000 Hz Nyquist (§5.2's
+Baseline 1 PSD survey). Architecture follows Conv-TasNet's own design
+(Luo & Mesgarani 2019) and NeoSSNet (Poh et al. 2024 — the closest prior
+work, also a masked Conv-TasNet-style model at 4 kHz), sized down to ~325K
+parameters ("lite") for this dataset's much smaller training pool; fixed
+source order (heart/lung are distinguishable classes, not interchangeable
+speakers like Conv-TasNet's original speech-separation task), so no
+permutation-invariant training. **Measured, not assumed**: full 5-fold CV
+on both evaluation substrates took 568.2s total on the available GPU, with
+every fold's training running the full 25 epochs and validation SI-SDR
+improving monotonically. Result (`results/baseline6_report.html`):
+
+| source | synthetic SDR, n=1500 | native-additive SDR, n=36 |
+|---|---|---|
+| heart | 3.16 ± 0.40 dB | 5.15 ± 2.74 dB |
+| lung  | 0.37 ± 0.35 dB | 2.14 ± 2.14 dB |
+
+This beats Baselines 1 and 2 on the synthetic set on both sources (Baseline
+1: heart 2.10±0.43 / lung -1.24±0.44 dB; Baseline 2: heart -0.70±0.40 /
+lung -3.73±0.40 dB — `results/baseline1_2_synthetic_report.html`), the
+first baseline in this project to post a positive synthetic-set lung SDR
+at all. On the native-additive column (n=36, wide CI) it's roughly tied
+with Baseline 1 rather than a clear win — the synthetic column (n=1500) is
+the more reliable comparison, same caveat every other baseline's
+synthetic-vs-native table carries. This is a first working configuration,
+not a tuned/converged model — no hyperparameter sweep was run.
 
 ### 5.3 Classification (new — not yet built)
 

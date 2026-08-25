@@ -13,7 +13,8 @@ Usage:
 import numpy as np
 import pandas as pd
 
-from baselines import fit_bandpass_baseline, make_supervised_nmf_baseline
+from baseline.baseline1 import fit_bandpass_baseline
+from baseline.baseline2 import make_supervised_nmf_baseline
 from metrics import SOURCE_LABELS
 from synthetic_mix import SYNTHETIC_MIX_N_FOLDS, SNR_SWEEP_DB, build_synthetic_set, evaluate_synthetic
 

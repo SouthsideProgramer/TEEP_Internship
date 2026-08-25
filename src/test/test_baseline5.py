@@ -1,16 +1,15 @@
 """
-Minimal correctness tests for baselines.py's new machinery (Baseline 5,
-EVMD). Not an attempt to re-verify the EVMD paper's own K-selection
-semantics -- those are already flagged in code_description.md as this
-project's interpretation of a genuinely thin source description, not
-re-litigated here. This just checks the VMD implementation itself (the
-part with no ambiguity: it's a standard, fully-specified algorithm) does
-what VMD is supposed to do.
+Minimal correctness tests for baseline/baseline5.py (EVMD). Not an attempt
+to re-verify the EVMD paper's own K-selection semantics -- those are
+already flagged in code_description.md as this project's interpretation of
+a genuinely thin source description, not re-litigated here. This just
+checks the VMD implementation itself (the part with no ambiguity: it's a
+standard, fully-specified algorithm) does what VMD is supposed to do.
 """
 import numpy as np
 import pytest
 
-from baselines import _energy_loss_coefficient, _normalized_permutation_entropy, _vmd
+from baseline.baseline5 import _energy_loss_coefficient, _normalized_permutation_entropy, _vmd
 
 
 @pytest.fixture(scope="module")

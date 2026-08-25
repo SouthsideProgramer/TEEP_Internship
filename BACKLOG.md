@@ -554,3 +554,155 @@ Generated output dirs (`src/visualization/plots/`,
   environment (`pdflatex`/`latexmk` not installed) — `report.tex` is
   updated but `report.pdf` was not regenerated; needs a local/Overleaf
   rebuild.
+
+## Done (2026-08-25 session)
+
+- **Baseline 6: Conv-TasNet-lite** (`src/convtasnet.py`, `src/baseline6_report.py`,
+  `src/test_convtasnet.py`, new) — the first neural, end-to-end learned
+  separation baseline, unlike Baselines 1-5's zero-training or
+  fixed-dictionary fits.
+
+  **Sample-rate decision**, made explicitly before any training code was
+  written (the task brief called this out as a blocking decision): this
+  dataset is natively 4000 Hz, so public Conv-TasNet/Sepformer checkpoints
+  (trained at 8-16 kHz) don't apply without resampling, which would invent
+  no real information and need declaring in the paper as an artifact.
+  Decision: train from scratch at the native 4000 Hz rather than resample
+  up. This costs nothing physiologically — heart energy sits at 20-200 Hz
+  and lung at 100-1000 Hz (Baseline 1's own Welch-PSD survey), comfortably
+  under a 2000 Hz Nyquist at 4 kHz.
+
+  **Architecture**: the same encoder/TCN-separator/decoder design as
+  Conv-TasNet itself (Luo & Mesgarani, IEEE/ACM TASLP 2019,
+  `papers/Conv-TasNet_Surpassing_Ideal_Time-Frequency.pdf`) and NeoSSNet
+  (Poh et al., IEEE OJEMB 2024,
+  `papers/NeoSSNet_Real-Time_Neonatal_Chest_Sound_Separation_Using_Deep_Learning.pdf`
+  — the closest prior work, also a masked Conv-TasNet-style model
+  separating heart/lung from one chest channel at 4 kHz), sized down
+  ("lite") to ~325K parameters for this dataset's much smaller training
+  pool (vs. Conv-TasNet's own ~5M-parameter speech config or NeoSSNet's
+  8.4M-parameter transformer-augmented model) — no transformer mask
+  generator, just the original stacked-dilated-TCN separator (`TCN_B=64,
+  TCN_H=128, TCN_SC=64, TCN_P=3, TCN_X=6, TCN_R=2`, receptive field
+  ~1.27s). Sigmoid mask activation per source, independent (no unit-sum
+  constraint, per Conv-TasNet's own Sec. IV-A ablation). Fixed source
+  order (heart = channel 0, lung = channel 1) instead of
+  permutation-invariant training — heart and lung are distinguishable
+  classes here, not interchangeable speakers, matching NeoSSNet's own
+  choice.
+
+  **Training loop**: trains a fresh network per fold from that fold's
+  leakage-safe `hs_allowed`/`ls_allowed` pool (same contract every
+  baseline's `fit_and_separate_fn` receives). Training mixtures are
+  synthesized on the fly, reusing `synthetic_mix.py`'s own mixing recipe
+  (`mixed = a*(heart+lung) + noise`, gain calibrated from the native
+  additive rows, noise drawn to a uniformly-sampled SNR within
+  `SNR_SWEEP_DB`'s range) rather than inventing a separate one. A
+  file-level 80/20 split inside the allowed pool (never touching the
+  outer CV fold's held-out data) gives an internal validation set for
+  early stopping and LR scheduling — AdamW, LR halved after 4 epochs
+  without validation-SI-SDR improvement, best-checkpoint restore, matching
+  NeoSSNet's own training recipe (`MAX_EPOCHS=25, STEPS_PER_EPOCH=40,
+  BATCH_SIZE=8`, ~4-second training crops).
+
+  **Measured, not assumed**: full 5-fold CV on both substrates took
+  568.2s total this run (429.8s synthetic set, 138.4s native additive) on
+  the available CUDA GPU — every one of the 10 fold-trainings ran the
+  full 25 epochs without early-stopping, and validation SI-SDR improved
+  monotonically fold-to-fold (0.78-3.35 dB on synthetic, 1.91-3.02 dB on
+  native), i.e. the training loop is actually learning something, not
+  just running epochs. Results (`results/baseline6_report.html`):
+
+  | source | synthetic SDR (n=1500) | native-additive SDR (n=36) |
+  |---|---|---|
+  | heart | 3.16 ± 0.40 dB | 5.15 ± 2.74 dB |
+  | lung  | 0.37 ± 0.35 dB | 2.14 ± 2.14 dB |
+
+  This **beats Baselines 1 (bandpass) and 2 (supervised NMF) on the
+  synthetic set on both sources** (Baseline 1: heart 2.10±0.43 / lung
+  -1.24±0.44; Baseline 2: heart -0.70±0.40 / lung -3.73±0.40 — see
+  `results/baseline1_2_synthetic_report.html`), the first baseline in this
+  project to post a positive lung SDR on the synthetic set at all. On the
+  native-additive column (n=36, wide CI) it's roughly tied with Baseline 1
+  (heart 5.46±2.57, lung 4.05±2.29) rather than a clear win — read the
+  synthetic column (n=1500) as the more reliable comparison, same caveat
+  every other baseline's synthetic-vs-native table carries.
+
+  **Honest scope**: this is the first neural baseline, establishing the
+  training-loop infrastructure — not a tuned, converged model. No
+  hyperparameter sweep was run (unlike NeoSSNet's own Table VII ablation);
+  the config above is this project's first working choice, not a search
+  result. `test_convtasnet.py` (new, 12 tests, all passing): model
+  forward-pass shape/finiteness for arbitrary input lengths, SI-SDR loss
+  sanity (scale invariance, identity ceiling, uncorrelated-estimate
+  floor), the augmented-batch sampler's output shapes, and an end-to-end
+  training-loop smoke test that the `fit_and_separate_fn` contract works
+  and a too-small allowed pool raises rather than silently training on
+  nothing.
+
+  `Makefile`: new `baseline6` target -> `results/baseline6_report.html`;
+  `test` target now also runs `test_convtasnet.py`.
+
+- **Refactor: split `baselines.py`, move tests into `test/`** (requested
+  directly, not tied to a Notion ref). `src/baselines.py` had grown to
+  ~790 lines holding Baselines 0-5 plus report-generation glue; split for
+  readability now that there are 6 baselines (and growing) each with their
+  own paper, hyperparameters, and interpretation notes.
+
+  - **`src/baseline/`** (new package, still under `src/` per instruction):
+    `common.py` (the few pieces literally shared across baselines —
+    `HEART_BAND`/`LUNG_BAND`, `_bandpass`, `_peak_frequency`), and
+    `baseline1.py` .. `baseline5.py`, one module per baseline, each keeping
+    its own docstring/paper citation/hyperparameters/interpretation notes
+    verbatim from the old `baselines.py`. `baseline3.py` imports its NMF
+    machinery directly from `baseline2.py` (`DENOISE_BAND`, `N_FFT`,
+    `HOP_LENGTH`, `K_HEART`, `K_LUNG`, `_nmf_kl`, `_EPS`) rather than
+    duplicating it, since Baseline 3 is explicitly an ablation of Baseline
+    2 — the import itself now documents that relationship. No `__init__.py`
+    re-exports: every downstream import site (`first_sdr_table.py`,
+    `baseline12_synthetic_report.py`, `Makefile`'s `baseline1`-`baseline5`
+    targets, `test/test_baseline5.py`) was updated to import directly from
+    `baseline.baselineN`, not through a compatibility shim.
+  - **`src/baselines.py`** now holds only Baseline 0 (raw mixture, no
+    separation) plus the report-generation glue (SSA-paper-style synthetic
+    set, `_run_and_report`, `_delta_vs_raw_mixture_section`) and the
+    `__main__` block that builds `results/baselines_report.html` —
+    unchanged behavior, just re-sourcing Baselines 1-4 from their new
+    modules. Baseline 6 (`convtasnet.py`) stays where it is — a
+    fundamentally different kind of module (trains a model, not a fixed
+    `separate_fn`/`fit_fn` pair), not moved into `baseline/`.
+  - **`src/test/`** (new package): all `test_*.py` files moved here
+    (`git mv` where already tracked), plus a `conftest.py` that puts `src/`
+    on `sys.path` so every test file's existing imports
+    (`from load_dataset import ...`, `from baseline.baseline1 import ...`)
+    keep working unchanged despite tests now living one directory below
+    the modules they import. `test_baselines.py` renamed to
+    `test_baseline5.py` (its 6 tests are 100% about EVMD internals) with
+    its import updated to `from baseline.baseline5 import ...`.
+  - `Makefile`: `test` target now runs `pytest test/` (auto-discovers all
+    6 test files, whereas the previous hand-listed target had silently
+    excluded `test_synthetic_mix.py`/`test_baselines.py` — folded that gap
+    closed as a natural consequence of the reorg, not a separate fix); the
+    `baseline1`-`baseline5` targets' inline `-c` snippets updated to import
+    from `baseline.baselineN`; help text and the "Separation baselines"
+    header updated to name the new file layout.
+  - `code_description.md`: split the old single `## baselines.py` section
+    into `## baselines.py` / `## baseline/common.py` / `## baseline/
+    baseline1.py` .. `## baseline/baseline5.py` / `## convtasnet.py`
+    (section headers match file paths, per this doc's own stated
+    convention), with in-body file-path mentions and `test_baselines.py`/
+    `test_convtasnet.py` references updated to their new locations.
+    `PROTOCOL.md` §5.2's per-baseline "(implemented, `src/baselines.py`)"
+    pointers updated to the correct new per-baseline file; dated historical
+    entries (§8's "Done this session" log, the 2026-08-18 review update)
+    left as-is, same as BACKLOG.md's own past entries — those are accurate
+    records of what was true at the time, not current-state pointers.
+
+  **Verified, not assumed**: full `make test` (66 tests across all 6 files)
+  passes from the new layout; every top-level script
+  (`baselines.py`, `baseline12_synthetic_report.py`, `first_sdr_table.py`,
+  `baseline6_report.py`, `convtasnet.py`) imports cleanly; a direct
+  functional smoke test ran Baselines 0/1/4/5's `separate_fn`s and
+  Baselines 2/3's `fit_and_separate_fn`s end-to-end post-split (confirming
+  Baseline 3's import-from-Baseline-2 wiring actually works at runtime, not
+  just at import time).

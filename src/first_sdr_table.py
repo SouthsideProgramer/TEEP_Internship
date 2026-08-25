@@ -23,13 +23,11 @@ Usage:
 import numpy as np
 import pandas as pd
 
-from baselines import (
-    fit_bandpass_baseline,
-    fit_evmd_baseline,
-    fit_ssa_baseline,
-    make_standard_nmf_baseline,
-    make_supervised_nmf_baseline,
-)
+from baseline.baseline1 import fit_bandpass_baseline
+from baseline.baseline2 import make_supervised_nmf_baseline
+from baseline.baseline3 import make_standard_nmf_baseline
+from baseline.baseline4 import fit_ssa_baseline
+from baseline.baseline5 import fit_evmd_baseline
 from metrics import SOURCE_LABELS
 from synthetic_mix import SYNTHETIC_MIX_N_FOLDS, SNR_SWEEP_DB, build_synthetic_set, evaluate_synthetic
 
