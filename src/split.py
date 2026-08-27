@@ -102,6 +102,61 @@ def assign_folds(mix_df: pd.DataFrame | None = None, n_folds: int = 5, seed: int
     return mix_df
 
 
+def assign_hs_folds(
+    hs_df: pd.DataFrame,
+    mix_df_with_folds: pd.DataFrame,
+    n_folds: int = 5,
+    seed: int = 0,
+    stratify_col: str | None = None,
+) -> pd.DataFrame:
+    """
+    Fold assignment for HS.csv rows themselves (not just the dictionary-pool
+    exclusion dictionary_pool() computes), consistent with assign_folds()'s
+    Mix.csv fold assignment -- for a downstream classifier trained/evaluated
+    directly on isolated HS.csv audio (PROTOCOL.md Sec. 5.3 Condition A) to
+    reuse the exact same leak-group folds every separation baseline already
+    does, rather than defining a second, incompatible split.
+
+    An HS.csv recording that is byte-identical to a heart component used in
+    some Mix.csv leak group inherits that leak group's fold -- the same
+    boundary dictionary_pool() already enforces, just applied to the HS row
+    itself rather than to whether it's excluded from a fold's dictionary
+    pool. HS.csv recordings never reused in any mixture (roughly a third of
+    HS.csv, per this module's docstring) carry no leak-group constraint and
+    are assigned by balanced round-robin instead, optionally stratified by
+    stratify_col (e.g. a classifier's class-group column) so a fold can't
+    end up starved of a minority class.
+
+    Returns hs_df with 'heart_hash' and 'fold' columns added.
+    """
+    hs_df = hs_df.copy()
+    hs_df["heart_hash"] = hs_df["audio_path"].map(_content_hash)
+
+    hash_to_fold = dict(zip(mix_df_with_folds["heart_hash"], mix_df_with_folds["fold"]))
+    hs_df["fold"] = hs_df["heart_hash"].map(hash_to_fold)
+
+    fold_totals = hs_df["fold"].value_counts().reindex(range(n_folds), fill_value=0).to_dict()
+
+    unassigned = hs_df.index[hs_df["fold"].isna()]
+    strata = (
+        [idx for _, idx in hs_df.loc[unassigned].groupby(stratify_col).groups.items()]
+        if stratify_col
+        else [unassigned]
+    )
+
+    rng = np.random.default_rng(seed)
+    for idx in strata:
+        idx = list(idx)
+        rng.shuffle(idx)
+        for i in idx:
+            k = min(range(n_folds), key=lambda f: fold_totals[f])
+            hs_df.loc[i, "fold"] = k
+            fold_totals[k] += 1
+
+    hs_df["fold"] = hs_df["fold"].astype(int)
+    return hs_df
+
+
 def dictionary_pool(
     hs_df: pd.DataFrame, ls_df: pd.DataFrame, mix_df_with_folds: pd.DataFrame, held_out_fold: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:

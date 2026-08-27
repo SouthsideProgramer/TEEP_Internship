@@ -13,7 +13,9 @@ TORCH_INDEX := https://download.pytorch.org/whl/cu121
 
 .PHONY: help all venv install test validate split eval-harness baselines \
         baseline1 baseline2 baseline3 baseline4 baseline5 baseline6 synthetic-set \
-        baseline12-synthetic first-sdr-table stats plots clean clean-pyc clean-all
+        baseline12-synthetic first-sdr-table heart-classifier degradation-scheme sdr-sweep condition-b \
+        sdr-accuracy-curve sdr-knee-point compute-cost heart-classifier-cnn latency sdr-compute-plane \
+        stats plots clean clean-pyc clean-all
 
 .DEFAULT_GOAL := help
 
@@ -51,6 +53,64 @@ help:
 	@echo "                          Baseline 4/5's per-row cost at ~1500 synthetic rows, ~1-2 hrs)"
 	@echo "  make baseline12-synthetic -> results/baseline1_2_synthetic_report.html (Baselines 1+2"
 	@echo "                          only, synthetic + native columns, no Han & Quan column, faster)"
+	@echo ""
+	@echo "Condition A classifier (src/heart_classifier.py) -> results/heart_classifier_report.html:"
+	@echo "  make heart-classifier  MFCC + RBF-SVM on isolated HS.csv audio, same leak-group 5-fold"
+	@echo "                         split as the separation baselines; 4 grouped classes (Normal/"
+	@echo "                         Murmur/Extra Sound/Rhythm Disorder), accuracy + Macro-F1 with a"
+	@echo "                         95% CI, per-fold and per-class-group breakdowns"
+	@echo ""
+	@echo "Controlled degradation scheme (src/degradation.py, S6-01) -> results/degradation_scheme_report.html:"
+	@echo "  make degradation-scheme  validate the alpha-interpolation SDR sweep on real audio"
+	@echo "                           (monotonicity + target-SDR root-finder), see PROTOCOL.md Sec. 5.3.1"
+	@echo ""
+	@echo "Generated SDR sweep dataset (src/sdr_sweep.py, S6-02) -> results/sdr_sweep_report.html:"
+	@echo "  make sdr-sweep     run all 6 separation baselines once each over the 36 native additive"
+	@echo "                     rows, cache their real heart_est/lung_est (results/sdr_sweep_cache/),"
+	@echo "                     and apply the S6-01 degradation scheme to hit a 25..-5 dB target grid --"
+	@echo "                     the dataset Sprint 6's classification-and-plotting step consumes."
+	@echo "                     Does not touch the classifier. Slow (bisection-heavy + EVMD/Conv-TasNet"
+	@echo "                     separation cost) -- run in the background."
+	@echo ""
+	@echo "Condition B (src/condition_b.py, reproduces Yaqub's 89%->41% collapse) -> results/condition_b_report.html:"
+	@echo "  make condition-b   requires results/sdr_sweep_cache/ (make sdr-sweep first). Evaluates the"
+	@echo "                     SAME per-fold trained classifier from Condition A on isolated ground"
+	@echo "                     truth vs. each of the 6 baselines' real separated output; paired delta"
+	@echo "                     + significance test + confusion matrices per condition."
+	@echo ""
+	@echo "Accuracy-vs-SDR curve (src/sdr_accuracy_curve.py, S6-03) -> results/sdr_accuracy_curve_report.html:"
+	@echo "  make sdr-accuracy-curve   requires make sdr-sweep first. Measures the Condition B"
+	@echo "                            classifier at every point in the SDR sweep (not just each"
+	@echo "                            baseline's real output) -- the actual C2 knee-point curve."
+	@echo "                            Checkpointed to results/sdr_accuracy_curve.csv -- safe to"
+	@echo "                            interrupt and re-run; already-measured points are skipped."
+	@echo ""
+	@echo "Headline figure (src/sdr_knee_point.py, S6-04) -> results/sdr_knee_point_report.html:"
+	@echo "  make sdr-knee-point   accuracy-vs-SDR curve + knee point per baseline (the SDR below"
+	@echo "                        which separation stops beating not separating at all). Works off"
+	@echo "                        whichever baselines have cached separated audio so far -- renders"
+	@echo "                        a real but explicitly partial figure if S6-02 isn't fully done."
+	@echo ""
+	@echo "Second architecture / robustness check (src/heart_classifier_cnn.py, S7-06):"
+	@echo "  make heart-classifier-cnn   Architecture 2 (log-mel + shallow CNN) Condition A, matching"
+	@echo "                              heart_classifier.py's own report -> results/"
+	@echo "                              heart_classifier_cnn_report.html. sdr-knee-point (above) runs"
+	@echo "                              both architectures and compares their knee points."
+	@echo ""
+	@echo "Desktop latency (src/latency.py, uniform protocol) -> results/latency_report.html:"
+	@echo "  make latency   wall-clock + CPU-time inference latency per method (warm-up + timed"
+	@echo "                 repetitions, median+IQR); records and discloses ambient machine load."
+	@echo ""
+	@echo "SDR vs. compute plane (src/sdr_compute_plane.py) -> results/sdr_compute_plane_report.html:"
+	@echo "  make sdr-compute-plane   heart SDR (native additive rows) vs. MACs and vs. desktop"
+	@echo "                           latency, one point per separation baseline, with Pareto-"
+	@echo "                           dominance marked on each axis. Reuses this project's own"
+	@echo "                           already-measured SDR/MACs/latency numbers -- fast."
+	@echo ""
+	@echo "Compute cost (src/compute_cost.py) -> results/compute_cost_report.html:"
+	@echo "  make compute-cost   MACs and parameter counts per method (6 separation baselines +"
+	@echo "                      the Condition A classifier), on this dataset's real 15s/4000Hz"
+	@echo "                      signal length -- fast, independent of every other target above."
 	@echo ""
 	@echo "Reports (all HTML, written to results/ — terminal only prints progress):"
 	@echo "  make stats         per-class/per-location duration, sample rate, clipping stats"
@@ -136,6 +196,36 @@ first-sdr-table:
 
 baseline12-synthetic:
 	cd $(SRC) && ../$(PYTHON) baseline12_synthetic_report.py
+
+heart-classifier:
+	cd $(SRC) && ../$(PYTHON) heart_classifier.py
+
+degradation-scheme:
+	cd $(SRC) && ../$(PYTHON) degradation.py
+
+sdr-sweep:
+	cd $(SRC) && ../$(PYTHON) sdr_sweep.py
+
+condition-b:
+	cd $(SRC) && ../$(PYTHON) condition_b.py
+
+sdr-accuracy-curve:
+	cd $(SRC) && ../$(PYTHON) sdr_accuracy_curve.py
+
+sdr-knee-point:
+	cd $(SRC) && ../$(PYTHON) sdr_knee_point.py
+
+latency:
+	cd $(SRC) && ../$(PYTHON) latency.py
+
+sdr-compute-plane:
+	cd $(SRC) && ../$(PYTHON) sdr_compute_plane.py
+
+compute-cost:
+	cd $(SRC) && ../$(PYTHON) compute_cost.py
+
+heart-classifier-cnn:
+	cd $(SRC) && ../$(PYTHON) heart_classifier_cnn.py
 
 stats:
 	cd $(SRC)/statistics && ../../$(PYTHON) audio_quality.py

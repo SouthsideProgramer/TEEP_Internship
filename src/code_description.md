@@ -450,6 +450,590 @@ rows -- are what gets assigned to folds. Any HS.csv/LS.csv recording whose
 content matches a recording in a held-out fold is excluded from that fold's
 dictionary-fitting pool.
 
+`assign_hs_folds()` (new, for `heart_classifier.py`'s Condition A) extends
+this to assign HS.csv rows *themselves* a fold, not just decide whether
+they're excluded from a fold's dictionary pool: a recording byte-identical
+to a Mix.csv leak group's heart component inherits that leak group's fold
+(the same boundary `dictionary_pool()` already enforces, reused rather than
+redefined); recordings never reused in any mixture have no leak-group
+constraint and are assigned by balanced round-robin, optionally stratified
+by a caller-supplied column (the classifier's `class_group`) so no fold
+ends up starved of a minority class.
+
+## heart_classifier.py
+
+PROTOCOL.md Sec. 5.3 Condition A: classification accuracy on HS.csv's own
+clean/isolated heart sound recordings, on the same leak-group 5-fold split
+every separation baseline already uses (`split.py`'s `assign_hs_folds()`).
+The first accuracy number in the project -- everything before this is
+SDR/SIR/SAR in dB -- and the anchor the charter's C2 sweep (PROTOCOL.md
+Sec. 4) will be compared against once Condition B (classifying separated
+audio) exists.
+
+**Class-grouping decision** (blocking, made before any classifier code):
+full 10-class Heart Sound Type classification is out -- S4 has only 2
+recordings total, so under the leak-group split it can't appear in every
+fold's training set at all, and AV Block/Tachycardia (n=3 each) are barely
+better off. Grouped into Yaqub et al.'s (`[spectrotemporal]`) own 4-class
+scheme for this same dataset (confirmed from the primary source, not the
+review's summary): Normal (n=9), Murmur (n=24, the 4 murmur types),
+Extra Sound (n=7, S3+S4), Rhythm Disorder (n=10, AFib+Tachycardia+AV Block).
+This was chosen over collapsing to binary Normal/Abnormal specifically so
+Condition A's number stays comparable to the 86-89% figures the project's
+own motivating result (Yaqub's 89%->41% collapse, PROTOCOL.md Sec. 3) is
+reported on -- see `heart_classifier.py`'s module docstring for the full
+paragraph, which is also PROTOCOL.md Sec. 5.3's Methods text verbatim.
+
+**Architecture**: 13 MFCCs pooled to mean+std over time (26-dim feature
+vector) + an RBF-kernel, class-balanced SVM -- one architecture,
+deliberately (this is a measuring instrument, not a contribution; see
+BACKLOG.md's S7-06 note for the planned second-architecture robustness
+check). Chosen over a CNN because n=50 recordings (as few as ~35-40/fold
+in training) is far too little data for a deep model without the result
+being dominated by overfitting noise, and MFCC+SVM is PROTOCOL.md Sec.
+5.3's own stated fallback for exactly this regime. No hyperparameter
+search was run (`C=1.0`, `gamma='scale'` are sklearn's defaults).
+
+`cross_validate_classifier()` fits a fresh classifier per fold on that
+fold's training split and reports accuracy + Macro-F1 per fold plus a
+95%-CI aggregate across folds (n=5 -- indicative, not decisive, per
+PROTOCOL.md Sec. 6). First measured result (`results/heart_classifier_
+report.html`): accuracy 58.0% ± 7.3% (95% CI), Macro-F1 0.43 ± 0.07,
+with per-class-group recall Normal 44%, Murmur 88%, Extra Sound 29%,
+Rhythm Disorder 20% -- a majority-class bias toward Murmur (n=24/50), the
+expected shape of the small-n class-imbalance problem the grouping
+decision reduced but didn't eliminate.
+
+**Failure mode analysis (confusion matrices)**: `confusion_counts()` (raw,
+pooled across all folds' held-out predictions -- every recording is
+predicted exactly once in its own held-out fold, so pooling never
+double-counts), `confusion_recall_pct()` (row-normalized, the same
+convention Yaqub et al.'s own confusion matrices use, Figs. 13-16, for
+direct visual comparability), and `top_confusions()` (the single most
+common *wrong* prediction per true class_group, excluding the correct
+diagonal cell -- the specific failure mode behind a low recall number, not
+just the rate). `plot_confusion_heatmap()` renders a row-normalized-color
+heatmap with count + row-% annotations to `results/plots/heart_classifier_
+confusion_matrix.png`.
+
+Measured result (`results/heart_classifier_report.html`): the dominant
+failure mode is **both minority classes' errors pulling toward Murmur**,
+not a symmetric confusion spread -- Extra Sound is predicted Murmur more
+often than it's predicted correctly (43% vs. 29% recall), and Rhythm
+Disorder is predicted Murmur nearly as often as any other single outcome
+(40% vs. 20% recall), while Murmur itself is barely ever predicted for
+something else (0% confused as Normal or Extra Sound, only 8% as Rhythm
+Disorder). Normal is the one class whose dominant confusion runs the other
+direction, toward Rhythm Disorder (33%) rather than Murmur. Consistent
+with Murmur's training-set dominance (n=24/50) pulling the decision
+boundary toward it despite `class_weight='balanced'` reweighting the SVM's
+loss -- reweighting the loss doesn't guarantee balanced predictions when
+the underlying 26-dim MFCC-summary feature space gives the four classes
+limited separability to begin with.
+
+`test/test_heart_classifier.py` (18 tests): class-group mapping totals
+match the documented decision, `assign_hs_folds()`'s leak-safety property
+(a recording reused in Mix.csv gets the same fold as that mixture's leak
+group -- mirrors `test_split.py`'s load-bearing dictionary-pool test),
+every fold's training set covers all 4 class groups, feature-vector shape,
+cross-validation output shape/range, and the confusion-matrix functions
+(counts sum to class sizes, diagonal matches per-class recall, row-%
+sums to 100, dominant-confusion lookup excludes the diagonal, plus a
+small hand-checked example). All passing.
+
+Also exposes `predict_one(clf, y, sr)` and (renamed from `_aggregate_ci95`)
+`aggregate_ci95()` as public functions -- part of the "backend contract"
+(alongside `train_fold_classifiers`) `condition_b.py`/
+`sdr_accuracy_curve.py`/`sdr_knee_point.py` call generically via a
+`backend` parameter (S7-06, see `heart_classifier_cnn.py` below), so
+either architecture plugs into the same downstream pipeline unchanged.
+
+## heart_classifier_cnn.py
+
+S7-06: the second classifier architecture for the C2 knee-point
+robustness check -- no longer optional once C2's knee point, not
+classification accuracy on its own, is the paper's headline result. The
+charter's "one architecture only" rule held when the classifier was a
+measuring instrument for a secondary result; once the knee point IS the
+paper, a reviewer's first question is whether it's a property of
+separation quality or of the one architecture that measured it.
+
+**Architecture**: log-mel spectrogram (40 mel bins, same `N_FFT`/
+`HOP_LENGTH` as `heart_classifier.py`) + a shallow CNN (2 conv blocks,
+global average pooling, one linear head -- a few thousand parameters).
+Deliberately as different from Architecture 1 as possible while staying
+"small and well-understood" (§5.3's own phrase): a 2D time-frequency
+representation instead of pooled MFCC summary statistics, a
+gradient-trained model instead of a kernel method -- two flavors of SVM
+wouldn't isolate whether a knee-point disagreement is about separation or
+about one specific decision boundary.
+
+Reuses everything architecture-agnostic from `heart_classifier.py`
+directly: `CLASS_GROUPS`, `HEART_TYPE_TO_GROUP`, `add_class_group`,
+`assign_classifier_folds`, `aggregate_ci95`, and the confusion-matrix
+functions (`confusion_counts`/`confusion_recall_pct`/`top_confusions`/
+`plot_confusion_heatmap`, generic over any true/pred `predictions_df`).
+Only feature extraction, the model (`_ShallowCNN`, a raw `nn.Module`),
+and the fit/predict loop (`CNNClassifier`, a thin `.fit`/`.predict`
+adapter matching sklearn's duck-typed interface) are architecture-specific.
+
+**Backend contract**: exposes `train_fold_classifiers(hs_df, n_folds)`
+and `predict_one(clf, y, sr)`, the same two functions
+`heart_classifier.py` exposes -- lets `condition_b.py`/
+`sdr_accuracy_curve.py`/`sdr_knee_point.py` run their entire weight-
+sharing/fold-alignment/knee-point pipeline against either architecture
+via a `backend` module parameter (default `heart_classifier`), the same
+"same call contract, no shared base class" pattern the six separation
+baselines already use.
+
+**Real measured result, a genuine disclosed limitation** (`results/
+heart_classifier_cnn_report.html`, first configuration, no hyperparameter
+search): Condition A accuracy 30.0% ± 8.8% (95% CI, 5-fold) vs.
+Architecture 1's 58.0% -- and its confusion matrix shows a collapse
+toward predicting **Normal** for 44/50 recordings (100% Normal recall,
+but Murmur/Extra Sound/Rhythm Disorder all routing overwhelmingly to
+Normal instead of their own class). This is a different majority-attractor
+than Architecture 1's own pull toward Murmur -- the two architectures
+don't just perform differently, they fail differently, which is itself
+informative for the robustness check (genuinely distinct decision
+boundaries, not the same shortcut twice). It's also exactly the
+overfitting risk `heart_classifier.py`'s own docstring predicted when it
+chose SVM over CNN for n=50 -- tested directly here, not dismissed, and
+the risk turned out real. Practical consequence: a knee-point
+disagreement measured against this first CNN configuration can't yet
+cleanly separate "the knee is architecture-dependent" from "this CNN
+config isn't a reliable enough classifier to support the comparison" --
+`sdr_knee_point.py`'s own report states this caveat automatically
+whenever Architecture 2's isolated accuracy is below 40%.
+
+`test/test_heart_classifier_cnn.py` (8 tests, using a `max_epochs`
+override for speed -- mirrors `convtasnet.py`'s own testability pattern):
+feature-shape consistency across recordings, `CNNClassifier` fit/predict
+round-trip, predicting before fitting raises, seeded reproducibility, the
+backend contract (`train_fold_classifiers`/`predict_one`), and end-to-end
+cross-validation output shape. All passing.
+
+## degradation.py
+
+S6-01 (pulled forward twice: S6 -> S5 -> S2, see BACKLOG.md for both
+decisions). Designs and validates the controlled separation-degradation
+scheme PROTOCOL.md Sec. 5.3.1 uses to sweep separation quality
+continuously, for the charter's C2 knee-point curve.
+
+**The scheme**: `degrade_toward_ground_truth(ground_truth, estimate,
+alpha)` linearly blends a real separation baseline's own estimate toward
+its ground truth -- `degraded = g + alpha*(s - g)` -- so alpha=0 is clean
+and alpha=1 is that baseline's real output. `degrade_row()` applies this to
+one source (heart or lung) of a mix row while holding the *other* source's
+estimate fixed at its real separated value, and scores the result through
+`metrics.evaluate_heart_lung()` directly -- no parallel metric definition.
+`sdr_sweep()` runs a grid of alphas and returns the *measured* SDR/SIR/SAR
+at each, since alpha itself has no physical meaning and different rows/
+methods reach a given alpha at different real SDRs.
+
+**The x-axis decision** (the actual point of this ticket, see PROTOCOL.md
+Sec. 5.3.1 for the full memo): the curve's x-axis is measured SDR, not
+synthetic SNR (SNR is undefined for Yaqub et al.'s own bandpass-separated
+point, so it can't be the unit that places their result on the curve) --
+real-method points and this scheme's dense sweep share one SDR axis.
+
+**Real finding from validating on real data** (not glossed over): a
+uniform alpha grid gives a badly uneven spread of measured SDR -- most of
+the curve's informative range falls inside alpha in [0, 0.1], since dB is
+most sensitive to small absolute error near a perfect match. Added
+`find_alpha_for_target_sdr()` (bisection over alpha, valid because
+SDR(alpha) is monotonic -- checked, not assumed) so a caller can request an
+evenly-spaced target-SDR grid directly instead.
+
+Also `find_alphas_for_target_sdrs()` -- a batched version added for
+`sdr_sweep.py` (S6-02): generating the sweep needs several target SDRs per
+(row, source), and a from-scratch 40-iteration bisection per target
+multiplies BSS-Eval's own per-call cost (mir_eval's permutation search
+over full-length audio) by the number of targets for no reason. This
+builds one coarse, log-spaced probe table per (row, source) -- reusing the
+same monotonicity property, not a new assumption -- then refines each
+target from an already-narrow bracket instead of the full [0, 1] range.
+Measured ~1.8x wall-clock speedup on `test_sdr_sweep.py`'s tiny case
+(agreement with the unbatched function verified directly, not assumed --
+`TestFindAlphasForTargetSdrsBatched` in `test_degradation.py`).
+
+`test/test_degradation.py` (14 tests): interpolation endpoints/midpoint,
+truncation, source isolation, the monotonicity property on real dataset
+audio (Baseline 1's actual output on a native additive row), the
+root-finder's accuracy plus its endpoint-clamping behavior, and the
+batched version's agreement with the unbatched one plus its own clamping.
+All passing.
+
+Scope: this module designs and validates the degradation *mechanism*
+itself; it does not build the accuracy-vs-SDR curve, which needs
+Condition B (PROTOCOL.md Sec. 5.3, classifying separated audio) to exist
+first -- still open.
+
+## sdr_sweep.py
+
+S6-02, pulled forward from S6 into S5 alongside S6-01 (same holiday
+reasoning -- see `degradation.py`'s section above and BACKLOG.md). Actually
+*generates* the controlled SDR sweep dataset S6-01 designed: runs every one
+of the six separation baselines (S4-03) once per fold over the 36 native
+additive rows (same substrate `degradation.py`'s own validation used),
+caches each baseline's real `heart_est`/`lung_est` to `results/
+sdr_sweep_cache/<baseline>/<mixed_id>_<source>.wav`, then uses
+`degradation.py`'s `find_alphas_for_target_sdrs()` to hit a fixed
+`TARGET_SDR_GRID_DB = (25, 20, 15, 10, 5, 0, -5)` dB grid for every
+(baseline, row, source).
+
+Does not touch the classifier at all -- confirmed by import graph, not
+just description: this module imports `degradation`, `load_dataset`,
+`metrics`, `report_utils`, `split`, and the six baseline modules, nothing
+from `heart_classifier.py` -- so it ran independently of, and in parallel
+with, S5-01 (the classifier).
+
+**Design, mirroring `synthetic_mix.py`'s own split** between a cheap
+provenance table and audio reconstructed on demand: separation itself (the
+expensive part, especially Baselines 2/5/6) is cached once per (baseline,
+fold), never re-run per target-SDR grid point; `synthesize_sweep_row()`
+reconstructs the actual degraded waveform on demand from that cache plus a
+provenance row's own alpha (a single cheap `degrade_toward_ground_truth`
+call) -- the swept dataset a future classification step consumes is this
+provenance table (`results/sdr_sweep_provenance.csv`) plus the cache
+directory, not gigabytes of pre-materialized degraded audio.
+
+`test/test_sdr_sweep.py` (7 tests, deliberately cheap -- a 4-row subset and
+only Baseline 1): schema/row-count, alpha validity, the
+`clamped_to_baseline_floor` flag agreeing with alpha, cached `.wav` files
+existing where expected, target-vs-alpha monotonicity surfaced through the
+generated table itself, and `synthesize_sweep_row()`'s reconstruction
+matching what `build_sdr_sweep()` recorded (including an alpha=0 case that
+must reproduce ground truth exactly regardless of the cached estimate).
+All passing.
+
+**Measured, not assumed**: see BACKLOG.md's 2026-08-27 entry for the actual
+generation run's coverage (rows generated, wall-clock, per-baseline
+target-vs-achieved accuracy, and how many grid points clamped to each
+baseline's own real SDR floor) -- `results/sdr_sweep_report.html` has the
+full breakdown.
+
+## condition_b.py
+
+Condition B of PROTOCOL.md Sec. 5.3 -- evaluates the Condition A classifier
+on real separated audio (S6-02's cache) instead of isolated ground truth.
+This is the controlled-conditions reproduction of Yaqub et al.'s
+89%->41% collapse (PROTOCOL.md Sec. 3), run with all six of this project's
+separation baselines instead of their one bandpass filter.
+
+**Weight-sharing decision** (the open item PROTOCOL.md Sec. 5.3 flagged,
+resolved here): the *same* trained classifier weights per fold, not
+retrained on separated audio -- matching Yaqub et al.'s own methodology
+exactly (their Experiment 3 model *is* their Experiment 4 model). Isolates
+the separation method as the only variable between the two conditions.
+
+**Fold-basis alignment** (a real correctness trap this module exists to
+avoid): `heart_classifier.assign_classifier_folds()` defaults to folding
+HS.csv against the *full* 145-row Mix.csv, but `sdr_sweep.py` folds its
+36-row native-additive substrate independently (a different row set
+produces a different leak-group partition, even with the same seed --
+matching the precedent already established in `first_sdr_table.py`'s own
+`mix_df=valid_mix_df` override of `cross_validate`). Evaluating "the same
+trained weights" requires both to agree on what fold k *is* --
+`build_condition_b_fold_basis()` computes the native-additive fold
+assignment once and passes it into `assign_classifier_folds()`'s
+`mix_df_with_folds` parameter (added to `heart_classifier.py` for this),
+so the classifier and the cached separated audio are guaranteed to share
+one leak-safe partition, not two independently-computed ones that happen
+to use the same seed.
+
+`evaluate_condition_b()` classifies, for every native-additive row: the
+row's own isolated ground-truth heart recording (`Mix.csv`'s own
+`heart_audio_path` -- not a lookup back into HS.csv, since not every
+mix-heart recording has a standalone HS.csv counterpart at all) once, and
+each baseline's real separated `heart_est` (loaded straight from
+`sdr_sweep.estimate_path()`'s cache, not through the degradation machinery
+-- Condition B evaluates each method's actual output, not an interpolated
+point) -- both through `heart_classifier.train_fold_classifiers()`'s
+fold-k weights. `summarize_by_baseline()`/`summarize_by_fold()` give
+accuracy/Macro-F1 per condition; `paired_delta_vs_isolated()` computes
+PROTOCOL.md Sec. 5.4's primary result (`accuracy_isolated -
+accuracy_separated`, paired by fold) with a paired t-test per baseline
+(n=5 folds -- indicative, not decisive, per Sec. 6). The `__main__` block
+also renders a confusion matrix (reusing `heart_classifier.py`'s
+`confusion_counts`/`confusion_recall_pct`/`top_confusions`/
+`plot_confusion_heatmap` directly -- these are generic over any
+true/pred `predictions_df`, not HS.csv-specific) per condition.
+
+`test/test_condition_b.py` (11 tests, deliberately cheap -- a 4-row subset,
+Baseline 1's real bandpass output cached the same way `sdr_sweep.py`
+would): the fold basis matches `assign_folds()` computed the identical
+way, the classifier never trains on a recording in its own held-out fold,
+schema/row-count, isolated rows carry no SDR while separated rows do, and
+-- the load-bearing check -- the isolated and separated predictions for
+the same row come from literally the same fitted classifier object. All
+passing.
+
+**`backend` parameter (S7-06)**: `evaluate_condition_b()`/
+`evaluate_no_separation()` accept a `backend` module (default
+`heart_classifier`) and call `backend.train_fold_classifiers()`/
+`backend.predict_one()` instead of hardcoding `heart_classifier`'s own --
+lets `heart_classifier_cnn.py` (Architecture 2) run the identical
+isolated/separated/no-separation comparison unchanged.
+`TestBackendParameter` (3 new tests) proves this with a fake stub backend
+that always predicts a fixed label, confirming the passed backend is
+actually used rather than silently ignored, without paying for a real
+CNN training run.
+
+**Measured, not assumed**: see BACKLOG.md's 2026-08-27 entry for the real
+run's accuracy numbers (isolated vs. each baseline's separated accuracy,
+the paired delta and significance test, and the dominant failure mode per
+condition) -- `results/condition_b_report.html` has the full breakdown.
+
+## sdr_accuracy_curve.py
+
+S6-03: measures downstream classification accuracy at *every* point in
+S6-02's controlled SDR sweep, not just each baseline's real (alpha=1)
+output the way `condition_b.py` does -- this is the actual accuracy-vs-SDR
+curve PROTOCOL.md Sec. 5.3.1 designed the x-axis for. Scoped to Sprint 6's
+three working days (24/29/30 Sep -- 25/28 Sep are holidays); design (S6-01)
+and generation (S6-02) already happened in S5, so this script's only job
+is measurement, reusing everything else as-is.
+
+Consumes S6-02's outputs directly (`results/sdr_sweep_provenance.csv` +
+`results/sdr_sweep_cache/`) and Condition B's weight-sharing setup
+(`condition_b.build_condition_b_fold_basis()` / `heart_classifier.
+train_fold_classifiers()`) -- same trained weights per fold, never
+retrained on degraded audio, consistent with every other measurement in
+this family. Only `source == "heart"` rows are measured; the sweep's
+lung-source rows exist for BSS Eval's own 2-source bookkeeping and have no
+classification counterpart.
+
+**Scripted to run unattended**, per the brief: `measure_accuracy_at_each_
+sdr_point()` checkpoints to `results/sdr_accuracy_curve.csv` every
+`CHECKPOINT_EVERY` rows, and a re-run loads that file first and skips any
+`(baseline, mixed_id, target_sdr)` triple already present -- safe to
+interrupt (e.g. across the Sprint 6 holiday gap) and resume without
+redoing completed work. Also carries a defensive consistency check: each
+row's own recorded fold (from S6-02's provenance) must agree with an
+independently recomputed classifier fold basis, or the script raises
+rather than silently using a possibly-wrong fold's classifier.
+
+`summarize_accuracy_curve()` aggregates to one row per `(baseline,
+target_sdr)`: accuracy, n, mean achieved SDR (the actual x-axis value --
+target_sdr is a request, achieved_sdr is what was measured), and the
+fraction of points clamped to that baseline's own real-output floor.
+`plot_accuracy_curve()` renders accuracy vs. measured SDR, one line per
+baseline, with the isolated-ground-truth accuracy as a dashed reference.
+
+`test/test_sdr_accuracy_curve.py` (12 tests, deliberately cheap -- a 4-row
+subset, Baseline 1 only): only heart rows get measured, output round-trips
+through disk, a simulated interrupt-and-resume produces identical
+predictions to a fresh full run while only re-computing the missing rows
+(checked via a monkeypatched call-counter on `synthesize_sweep_row`, not
+just "the final answer happens to match"), the fold-consistency assertion
+actually raises on a tampered row, and the summary's per-group accuracy
+matches direct computation. All passing.
+
+**`backend` parameter (S7-06)**: `measure_accuracy_at_each_sdr_point()`
+accepts a `backend` module (default `heart_classifier`) and calls
+`backend.train_fold_classifiers()`/`backend.predict_one()`; `output_path()`
+is backend-aware too (`results/sdr_accuracy_curve_<backend>.csv` for
+anything other than the default), so the two architectures' checkpoints
+never collide. `TestBackendParameter` (2 new tests) checks both with a
+fake stub backend.
+
+**Measured, not assumed**: see BACKLOG.md's 2026-08-27 entry for the real
+run's curve (accuracy at each SDR point, per baseline, and whether a knee
+point is visible) -- `results/sdr_accuracy_curve_report.html` has the full
+breakdown.
+
+## sdr_knee_point.py
+
+S6-04, the project's headline figure per the Sprint 0 re-scope: plots the
+accuracy-vs-SDR curve and identifies the knee point. Treats every upstream
+module (`split.py`, the six baselines, `heart_classifier.py`,
+`degradation.py`, `sdr_sweep.py`, `condition_b.py`,
+`sdr_accuracy_curve.py`) as scaffolding for this one plot -- the first
+place this dataset's classification accuracy and separation-quality SDR
+live on the same axis (Yaqub et al. report accuracy with no SDR attached;
+this project's own Sec. 5.2 tables report SDR with no downstream accuracy
+attached).
+
+**Knee-point definition** -- operationalizes PROTOCOL.md Sec. 4's own
+wording ("the SDR below which separation actively hurts classification
+accuracy, relative to not separating at all") directly, rather than an
+arbitrary curvature/elbow heuristic: the SDR at which a baseline's
+accuracy(SDR) curve crosses `condition_b.evaluate_no_separation()`'s
+accuracy (classifying the raw, unseparated mixture directly), walking from
+high SDR to low. `find_knee_point()` returns one of four statuses
+(`crossed` -- interpolated between the two bracketing measured points;
+`always_above`/`always_below` -- no knee in the measured range;
+`noisy_crossing` -- a crossing exists but not in the expected high->low
+direction, flagged distinctly rather than silently treated as clean) so a
+reader can tell a real knee from small-n noise. No smoothing is applied --
+interpolating a curve through `len(TARGET_SDR_GRID_DB)` points (each
+averaging a handful of rows) would manufacture precision the data doesn't
+support, and n per point is always reported alongside the estimate.
+
+`condition_b.py` gained `evaluate_no_separation()` (+`NO_SEPARATION_LABEL`)
+for this: the third reference point PROTOCOL.md Sec. 4's C2 framing needs
+verbatim, classifying each row's raw mixed recording directly with the
+same fold-appropriate weights Condition A/B use.
+`condition_b.summarize_by_baseline()`'s output ordering was extended
+(`NO_SEPARATION_LABEL`, `ISOLATED_LABEL`, then each separation baseline)
+so all three condition types summarize through one function.
+
+**Honesty about partial data**: the `__main__` block checks which of the
+six baselines actually have cached separated audio (`sdr_sweep.py`'s
+`estimate_path()`) before plotting, and if `results/sdr_sweep_
+provenance.csv` doesn't exist yet (S6-02 still running), falls back to
+`sdr_sweep.build_provenance_from_cache()` for whichever baselines *are*
+ready rather than blocking on the full six-baseline generation run. The
+rendered figure's own title and report explicitly state how many
+baselines are present vs. still pending -- a real but partial figure says
+so, rather than silently looking complete.
+
+`test/test_sdr_knee_point.py` (12 tests, synthetic curves -- pure
+arithmetic, no audio I/O): a clean interpolated crossing, exact-equality
+edge case, always-above/always-below, the noisy-crossing case detected
+distinctly, row-order independence, multi-baseline dispatch, and (S7-06)
+`TestCompareKneePoints` -- agreement within tolerance, disagreement beyond
+it, the inconclusive case when one side has no clean crossing,
+baseline-intersection behavior, and the at-least-two-backends guard. All
+passing.
+
+**Cross-architecture robustness check (S7-06)**: `run_pipeline_for_
+backend()` runs the entire curve-and-knee-point pipeline (S6-03
+measurement + both reference points + knee detection) for one classifier
+backend; `present_baselines_for()` factors out the "which baselines have
+cached audio" check `__main__` used inline before. `compare_knee_points()`
+is the actual verdict -- per baseline, whether every architecture's
+`knee_sdr` falls within `tolerance_db` (default 3 dB) of each other.
+`agrees` is `True`/`False` only when *every* architecture found a clean
+`"crossed"` knee; `None` (inconclusive, not a silent "no") when any side
+found no clean crossing -- a real disagreement is never confused with "one
+architecture had nothing to compare." The `__main__` block now runs both
+`heart_classifier` and `heart_classifier_cnn`, and states a caveat
+automatically whenever Architecture 2's isolated accuracy falls below
+40% (true as of this session's first CNN configuration -- see
+`heart_classifier_cnn.py`'s own section above), so a knee-point
+disagreement isn't over-read while the second architecture itself is
+still unreliable.
+
+**Measured, not assumed**: see BACKLOG.md's 2026-08-27 entry for the
+actual curve, knee points, and how many of the six baselines were present
+when it ran -- `results/sdr_knee_point_report.html` has the full
+breakdown.
+
+## compute_cost.py
+
+MACs (multiply-accumulate operations) and parameter counts per method --
+the computational-cost dimension no table in this project had reported
+yet, matching Yaqub et al.'s own Table 5 (Params/GFLOPs/model size) and
+PROTOCOL.md's Edge-Enabled-paper deployment-hardware discussion (PYNQ-ZU
+FPGA, ~15 W), applied to this project's own six separation baselines plus
+the Condition A classifier, on this dataset's real 15s/4000Hz (60,000-
+sample) signal length. Independent of every other module built this
+session -- doesn't touch the sweep, the classifier's fold basis, or any
+background generation job, so it ran to completion immediately regardless
+of what else was in flight.
+
+**Two explicit precision tiers**, never blurred into one confident-looking
+number: "exact" (literal matrix-multiply/conv-layer shapes taken directly
+from each method's own real code, or measured from an actual forward
+pass) for Baseline 1 (bandpass), Baselines 2/3 (NMF -- exact MU-update
+matmul shapes), Baseline 6 (Conv-TasNet-lite -- measured via forward hooks
+on every real `Conv1d`/`ConvTranspose1d`, not analytically re-derived
+stride/padding/dilation arithmetic), and the classifier (a real fold's
+fitted SVM, support-vector count read directly, not guessed); "estimate"
+(standard textbook complexity formulas -- reduced-SVD FLOPs, ADMM
+elementwise-loop counts) for Baseline 4 (MSSA) and Baseline 5 (EVMD),
+whose real cost has no closed-form matmul shape to count exactly.
+
+**Real measured result** (`results/compute_cost_report.html`, per-mixture
+inference cost on a real 60,000-sample recording):
+
+| method | params | MACs/inference | precision |
+|---|---|---|---|
+| Baseline 1 (bandpass) | 0 | 2.4M | exact |
+| Condition A classifier (MFCC+SVM) | 40 support vectors | 8.1M | exact |
+| Baseline 2 (supervised NMF) | 7,710 (frozen dictionary) | 219M | exact |
+| Baseline 3 (standard NMF) | 0 (transductive) | 1.16G | exact |
+| Baseline 4 (MSSA) | 0 | 1.20G | estimate |
+| Baseline 6 (Conv-TasNet-lite) | 325,465 | 1.96G | exact |
+| Baseline 5 (EVMD) | 0 | 5.22G | estimate |
+
+Two findings worth calling out: (1) Baseline 6's measured param count
+(325,465) independently reproduces the ~325K figure BACKLOG.md's own
+2026-08-25 session already reported from PyTorch's own summary -- a real
+cross-check, not a coincidence of rounding. (2) Baseline 3 costs ~5.3x
+more MACs per mixture than Baseline 2 despite being the "simpler" ablation
+(no learned dictionary) -- because it is fully transductive (every one of
+its 160 MU iterations updates both W and H fresh per mixture, vs.
+Baseline 2's 60 activation-only iterations against an already-frozen
+dictionary), giving BACKLOG.md's existing "B2 is inductive, B3 is
+transductive" fairness caveat a concrete computational-cost number to go
+with it, not just a qualitative distinction. EVMD (already known to be
+the slowest baseline by wall-clock, ~15s/mixture) is confirmed the most
+expensive by MACs too, by a wide margin (~2,175x more than the bandpass
+floor) -- consistent with, not contradicting, its own measured wall-clock
+ranking.
+
+`test/test_compute_cost.py` (14 tests): each exact formula checked against
+a hand-computable small case or an independent recomputation from the same
+real constants; each estimate formula checked against its own stated
+inputs; Conv-TasNet's param count cross-checked against a direct
+`model.parameters()` sum and against the previously-reported ~325K
+ballpark; the classifier's support-vector count cross-checked against a
+freshly-fitted model; and the real, expected Baseline-3-costs-more-than-
+Baseline-2 and EVMD-is-the-most-expensive-classical-baseline orderings
+both checked directly rather than assumed. All passing.
+
+## latency.py
+
+The empirical wall-clock/CPU-time counterpart to `compute_cost.py`'s
+analytic MACs/params table -- completes this project's own version of
+Yaqub et al.'s Table 5 (Params/GFLOPs/Model size/**Inference time**) for
+the six separation baselines plus the Condition A classifier. "Desktop"
+contrasts deliberately with the Edge-Enabled paper's PYNQ-ZU FPGA
+deployment target (PROTOCOL.md Sec. 2) -- this measures inference latency
+on the workstation this project runs on, with no claim about how these
+numbers translate to edge hardware.
+
+**Uniform protocol** (`time_calls()`), identical across every method
+regardless of what else is running on the machine: one untimed warm-up
+call, `N_TRIALS` timed repetitions (fewer for EVMD specifically --
+`N_TRIALS_SLOW` -- since its own K=2..10 sweep already costs ~15s/call by
+itself, and adding full repetitions to an already-expensive method
+disproportionately loads the machine for no extra protocol rigor), median
++ IQR reported for both wall-clock (`time.perf_counter()`) and process
+CPU time (`time.process_time()`, summed across the calling process's
+threads). One-time setup cost (NMF dictionary fitting on a small 5-file
+pool, Conv-TasNet-lite training with a reduced epoch count -- training
+quality doesn't affect *inference* speed, matching `test_convtasnet.py`'s
+own testability pattern) is fit once, untimed, before the timed region.
+
+**Machine-load honesty, built in from the start, not an afterthought**:
+`os.getloadavg()` is recorded at measurement time and stated in the
+report; when load exceeds CPU count, the report's own language switches
+to an explicit caveat (relative rankings between methods stay meaningful
+since every method is timed by the same code; absolute wall-clock values
+should be read as noisy upper bounds, not clean single-tenant numbers;
+CPU-time is offered as the more trustworthy comparison basis under
+contention -- less sensitive to *other processes'* scheduling, though not
+entirely immune to cache/memory-bandwidth contention).
+
+`test/test_latency.py` (7 tests): `time_calls()`'s own protocol logic
+checked with fast, deterministic synthetic functions (correct call count
+across warm-up + trials, non-negative medians/IQRs, a known-duration
+`time.sleep()` case confirming the wall-clock/CPU-time distinction
+actually holds), plus two real, cheap methods (bandpass, the classifier)
+exercised end-to-end to confirm `measure_*_latency()` wires real calls
+into `time_calls()` correctly -- the four expensive methods (both NMF
+baselines, MSSA, EVMD, Conv-TasNet) share the exact same tested protocol
+function, so they aren't re-exercised in the automated suite to avoid
+adding load during an already heavily-contended session. All passing.
+
+**Measured, not assumed**: see BACKLOG.md's 2026-08-27 entry for the real
+per-method latency numbers and the recorded machine load at measurement
+time -- `results/latency_report.html` has the full breakdown.
+
 ## statistics/audio_quality.py
 
 Audio quality + per-class/per-location statistics for the HLS-CMDS dataset.
