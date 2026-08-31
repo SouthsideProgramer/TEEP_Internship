@@ -109,7 +109,7 @@ def find_knee_point(curve_for_one_baseline: pd.DataFrame, no_separation_accuracy
         if not above[i] and above[i + 1]:
             return {"knee_sdr": float(sdrs[i]), "status": "noisy_crossing", "n_points": len(ordered)}
 
-    return {"knee_sdr": None, "status": "ambiguous", "n_points": len(ordered)}  # pragma: no cover -- shouldn't be reachable once above.any() and not above.all() both hold for >=2 points
+    return {"knee_sdr": None, "status": "ambiguous", "n_points": len(ordered)}
 
 
 def find_knee_points(curve_df: pd.DataFrame, no_separation_accuracy: float) -> pd.DataFrame:

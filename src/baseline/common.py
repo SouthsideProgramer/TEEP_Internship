@@ -11,8 +11,8 @@ see baseline3.py -- rather than a second copy of shared code).
 import numpy as np
 from scipy.signal import butter, sosfiltfilt, welch
 
-HEART_BAND = (20.0, 200.0)   # Hz
-LUNG_BAND = (150.0, 1000.0)  # Hz
+HEART_BAND = (20.0, 200.0)
+LUNG_BAND = (150.0, 1000.0)
 
 
 def _bandpass(y: np.ndarray, sr: int, low: float, high: float, order: int = 4) -> np.ndarray:

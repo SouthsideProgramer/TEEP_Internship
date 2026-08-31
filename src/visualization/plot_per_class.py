@@ -20,7 +20,7 @@ import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from load_dataset import load_hs, load_ls
 
 
@@ -31,7 +31,7 @@ def _representative_rows(df, type_col):
 
 def _grid_shape(n, ncols=4):
     ncols = min(ncols, n)
-    nrows = -(-n // ncols)  # ceil division
+    nrows = -(-n // ncols)
     return nrows, ncols
 
 

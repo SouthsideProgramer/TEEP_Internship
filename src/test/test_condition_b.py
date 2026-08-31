@@ -84,7 +84,6 @@ class TestBuildConditionBFoldBasis:
 
 class TestEvaluateConditionB:
     def test_schema_and_row_count(self, tiny_predictions, tiny_mix_df):
-        # One "Isolated" prediction + one per tested baseline (1 here) per row.
         assert len(tiny_predictions) == len(tiny_mix_df) * 2
         assert set(tiny_predictions["baseline"]) == {ISOLATED_LABEL, BASELINE_LABEL}
 
@@ -141,7 +140,7 @@ class _FakeBackend:
     train_fold_classifiers/predict_one, not heart_classifier's, rather than
     silently ignoring the parameter."""
 
-    FIXED_PREDICTION = "Rhythm Disorder"  # deliberately not what heart_classifier would predict
+    FIXED_PREDICTION = "Rhythm Disorder"
 
     @staticmethod
     def train_fold_classifiers(hs_df, n_folds):
@@ -149,7 +148,7 @@ class _FakeBackend:
 
     @staticmethod
     def predict_one(clf, y, sr):
-        assert clf.startswith("fake-classifier-fold-")  # proves *this* backend's classifier was used
+        assert clf.startswith("fake-classifier-fold-")
         return _FakeBackend.FIXED_PREDICTION
 
 

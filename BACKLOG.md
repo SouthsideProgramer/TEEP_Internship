@@ -1323,3 +1323,89 @@ Generated output dirs (`src/visualization/plots/`,
   passing.
 
   `Makefile`: new `latency` target → `results/latency_report.html`.
+
+## Done (2026-08-28 session)
+
+- **`report/report.tex` substantially expanded** (requested directly: "very
+  detail even a student can understand it... report why, what knowledge
+  was used," not tied to a Notion ref) — grew from 1433 to 2431 lines.
+  Two changes:
+
+  1. **New `Section~2, "Background and Preliminaries"`**, inserted right
+     after the Introduction: a from-scratch, student-level primer on
+     every technical idea the rest of the report depends on and had
+     previously assumed as background — blind source separation and why
+     it's underdetermined; BSS Eval's SDR/SIR/SAR decomposition and why
+     all three are reported instead of just SDR; NMF (non-negative
+     factorization, multiplicative updates, supervised vs. blind); SSA
+     (trajectory-matrix embedding, SVD, Hankelization); VMD (ADMM,
+     narrow-band mode optimization); Conv-TasNet's convolutions,
+     dilation, and encoder/separator/decoder design; $k$-fold
+     cross-validation and data leakage (with this project's own leak-group
+     split as the concrete example); classification metrics (accuracy's
+     blind spot, macro-F1, confusion matrices); and compute-cost
+     vocabulary (MACs, the Pareto front). Every later section now cross-
+     references this one by name instead of re-deriving a concept inline.
+  2. **New `Section~9, "Downstream Classification"` and `Section~10,
+     "Computational Cost"`**, inserted before Related Work — the report
+     previously stopped at Baseline 6 and the six-baseline results table,
+     missing everything from S2-03 (the classifier) onward. These two new
+     sections cover, in the same why-and-knowledge style as the rest of
+     the (already detailed) report: the one-architecture-first decision
+     and the Yaqub-scheme class-grouping decision; Architecture 1
+     (MFCC+SVM) and its real Condition A result (58.0% ± 7.3% accuracy)
+     with its confusion-matrix failure mode explained; the controlled
+     degradation scheme (including the real uniform-alpha-grid problem
+     found and the target-SDR root-finder fix); the SDR sweep generator;
+     Condition B's weight-sharing decision and its one real result so far
+     (Baseline 1: 50.0% isolated → 41.7% separated, not significant);
+     the knee-point definition; the second-architecture robustness check
+     (Architecture 2's real 30.0% accuracy and its different,
+     Normal-collapse failure mode, with the practical caveat this implies
+     for reading a future knee-point disagreement); and the real MACs,
+     latency (with its own machine-load caveat and the MACs-vs-latency
+     divergence finding), and SDR-vs-compute-plane methodology.
+
+  Abstract, introduction roadmap, and the Limitations/Future-Work section
+  were all updated to match — the stale "no classification stage yet"
+  bullet was replaced with an accurate statement of what's built vs. what
+  generation is still pending (the full six-baseline sweep and the
+  resulting knee-point curve), and a new bullet flags Architecture 2's
+  own need for tuning before its curve is trustworthy.
+
+  **Verified, not assumed** (no LaTeX toolchain is available in this
+  environment, so the PDF was not regenerated — same limitation the
+  report's own text already discloses): brace and `\begin`/`\end` balance
+  checked programmatically (1149/1149, 54/54), every `\label`/`\ref` pair
+  checked for duplicates and dangling references (none found), and the
+  newly added text scanned for unescaped `%`/stray `_` outside
+  `\texttt{}`/math mode (none found beyond two pre-existing, legitimate
+  line-continuation `%`s).
+
+- **`src/sdr_compute_plane.py`** (new) — completed the SDR-vs-compute
+  plane: the pending Baseline 6 native-additive SDR re-measurement
+  finished (5.15 ± 2.74 dB, 95% CI, n=36, pooled convention), and
+  reproduced the already-published 2026-08-25 figure exactly, a genuine
+  independent cross-check rather than a coincidence of rounding
+  (`baseline6_report.py` turns out to already use the same pooled-CI
+  convention as `first_sdr_table.py`, not the fold-level mean±std
+  convention some of the other PROTOCOL.md tables use). Hardcoded into
+  `SDR_HEART_DB` alongside Baselines 1–5's own already-published numbers
+  now that it's confirmed, rather than re-measured on every run.
+
+  **Real result** (`results/sdr_compute_plane_report.html` +
+  `results/plots/sdr_compute_plane.png`, sent to the user): on the MACs
+  plane, bandpass (Baseline 1) dominates every other baseline outright —
+  highest SDR *and* lowest MACs by nearly three orders of magnitude, so
+  every other method is Pareto-dominated. On the measured-latency plane,
+  that conclusion does **not** survive: bandpass and Conv-TasNet-lite
+  (Baseline 6) are *both* non-dominated (bandpass has higher SDR,
+  Conv-TasNet-lite has lower latency — a genuine trade-off), while every
+  other baseline remains dominated on both planes. This is the concrete
+  worked example of `latency.py`'s own MACs-vs-latency divergence finding:
+  a plane built from MACs alone would have hidden Conv-TasNet-lite's real
+  competitiveness entirely.
+
+  `report/report.tex` §10.3 updated with the completed table and finding
+  (previously stated as pending); 6 logic tests (`test_sdr_compute_plane.py`)
+  already passing from before this completion.

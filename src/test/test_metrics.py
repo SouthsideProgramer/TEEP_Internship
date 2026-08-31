@@ -24,7 +24,7 @@ from mir_eval.separation import bss_eval_sources
 from load_dataset import load_audio, load_mix
 from metrics import bss_eval, evaluate_dataset, evaluate_heart_lung, summarize_by_class
 
-N = 32000  # synthetic signal length; >> the 512-tap filter bss_eval fits, so stats converge tightly
+N = 32000
 SEED = 0
 
 
@@ -45,10 +45,6 @@ def _raw_mir_eval(reference_sources, estimated_sources, compute_permutation=True
         )
     return sdr, sir, sar, perm
 
-
-# ---------------------------------------------------------------------------
-# 1. Cross-checks against mir_eval
-# ---------------------------------------------------------------------------
 
 class TestCrossCheckAgainstMirEval:
     def test_bss_eval_matches_raw_mir_eval_call(self):
@@ -78,7 +74,6 @@ class TestCrossCheckAgainstMirEval:
             np.stack([s1, s2]), np.stack([heart_est, lung_est])
         )
 
-        # with independent per-source noise (not swapped), mir_eval should find the identity permutation
         assert list(raw_perm) == [0, 1]
         assert result["heart"]["sdr"] == pytest.approx(raw_sdr[0])
         assert result["heart"]["sir"] == pytest.approx(raw_sir[0])
@@ -105,10 +100,6 @@ class TestCrossCheckAgainstMirEval:
         assert result["heart"]["sdr"] == pytest.approx(raw_sdr[0])
         assert result["lung"]["sdr"] == pytest.approx(raw_sdr[1])
 
-
-# ---------------------------------------------------------------------------
-# 2. Synthetic mixtures with known ground truth
-# ---------------------------------------------------------------------------
 
 class TestSyntheticGroundTruth:
     def test_identity_separation_is_near_perfect(self):
@@ -146,7 +137,7 @@ class TestSyntheticGroundTruth:
         10*log10(power(s_j) / power(alpha*s_k)), and SAR should be very high.
         """
         s1, s2, _ = _white_sources()
-        theoretical_sir_db = -20 * np.log10(alpha)  # power(s1) ~= power(s2) for white noise of equal length
+        theoretical_sir_db = -20 * np.log10(alpha)
 
         result = evaluate_heart_lung(s1, s2, s1 + alpha * s2, s2 + alpha * s1)
 
@@ -165,19 +156,15 @@ class TestSyntheticGroundTruth:
 
         for source in ("heart", "lung"):
             assert np.isfinite(result[source]["sdr"])
-            assert result[source]["sdr"] > 10  # still recognizably a good, near-identity estimate
+            assert result[source]["sdr"] > 10
 
-
-# ---------------------------------------------------------------------------
-# Batch API integration (real dataset, trivial separation function)
-# ---------------------------------------------------------------------------
 
 class TestBatchEvaluation:
     def test_evaluate_dataset_and_summarize_by_class_on_real_rows(self):
         mix_df = load_mix().head(4)
 
         def passthrough(mixed, sr):
-            return mixed, mixed  # trivial "no separation" baseline
+            return mixed, mixed
 
         results = evaluate_dataset(passthrough, mix_df=mix_df)
         assert set(results["Mixed Sound ID"]) == set(mix_df["Mixed Sound ID"])

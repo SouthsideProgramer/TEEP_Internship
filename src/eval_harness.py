@@ -109,13 +109,9 @@ def aggregate_across_folds(fold_summary: pd.DataFrame) -> pd.DataFrame:
 if __name__ == "__main__":
     from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
 
-    # Smoke test with a baseline that doesn't actually use the dictionary pool,
-    # just to exercise the fold machinery end-to-end against real dataset audio.
     def identity_baseline(_hs_allowed, _ls_allowed):
-        # "Fits" nothing; separate_fn just isn't given the mixed signal's ground
-        # truth, so this is really testing plumbing, not separation quality.
         def separate(mixed, _sr):
-            return mixed, mixed  # no-separation baseline
+            return mixed, mixed
 
         return separate
 

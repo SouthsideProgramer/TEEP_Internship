@@ -14,10 +14,9 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from load_dataset import load_hs, load_ls, load_mix
 
-# A 16-bit PCM sample is clipped if it sits at the full-scale rail (+/-32767/32768).
 CLIP_THRESHOLD_INT16 = 32767
 
 

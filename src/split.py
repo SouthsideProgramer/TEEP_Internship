@@ -59,7 +59,7 @@ def _compute_leak_groups(mix_df: pd.DataFrame) -> np.ndarray:
                 uf.union(by_hash[h], i)
             else:
                 by_hash[h] = i
-        by_hash.clear()  # heart/lung hash namespaces don't collide with each other
+        by_hash.clear()
 
     roots = [uf.find(i) for i in range(len(mix_df))]
     renumber = {root: gid for gid, root in enumerate(dict.fromkeys(roots))}
@@ -88,7 +88,7 @@ def assign_folds(mix_df: pd.DataFrame | None = None, n_folds: int = 5, seed: int
 
     group_sizes = mix_df.groupby("leak_group").size()
     group_ids = group_sizes.index.to_numpy().copy()
-    np.random.default_rng(seed).shuffle(group_ids)  # randomize tie order among equal-size groups
+    np.random.default_rng(seed).shuffle(group_ids)
     group_ids = sorted(group_ids, key=lambda g: -group_sizes[g])
 
     fold_totals = [0] * n_folds

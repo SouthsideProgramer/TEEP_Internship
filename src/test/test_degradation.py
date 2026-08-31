@@ -86,7 +86,7 @@ class TestSdrSweepIsMonotonic:
         heart_ref, lung_ref, heart_est, lung_est = real_audio
         sweep = sdr_sweep(heart_ref, lung_ref, heart_est, lung_est, alphas=(0.0, 1.0), source="heart")
         real_metrics = evaluate_heart_lung(heart_ref, lung_ref, heart_est, lung_est)
-        assert sweep[0]["sdr"] > sweep[1]["sdr"]  # clean is far better than the real separated output
+        assert sweep[0]["sdr"] > sweep[1]["sdr"]
         assert sweep[1]["sdr"] == pytest.approx(real_metrics["heart"]["sdr"])
 
 
@@ -95,7 +95,7 @@ class TestFindAlphaForTargetSdr:
         heart_ref, lung_ref, heart_est, lung_est = real_audio
         real_metrics = evaluate_heart_lung(heart_ref, lung_ref, heart_est, lung_est)
         achievable_lo = real_metrics["heart"]["sdr"]
-        target = achievable_lo + 5.0  # comfortably inside the achievable range
+        target = achievable_lo + 5.0
         alpha = find_alpha_for_target_sdr(heart_ref, lung_ref, heart_est, lung_est, target_sdr_db=target, source="heart")
         achieved = degrade_row(heart_ref, lung_ref, heart_est, lung_est, alpha, "heart")["heart"]["sdr"]
         assert achieved == pytest.approx(target, abs=0.5)
@@ -130,8 +130,6 @@ class TestFindAlphasForTargetSdrsBatched:
             individual = find_alpha_for_target_sdr(heart_ref, lung_ref, heart_est, lung_est, target_sdr_db=target, source="heart")
             achieved_batched = degrade_row(heart_ref, lung_ref, heart_est, lung_est, batched[target], "heart")["heart"]["sdr"]
             achieved_individual = degrade_row(heart_ref, lung_ref, heart_est, lung_est, individual, "heart")["heart"]["sdr"]
-            # Compare achieved SDR, not the raw alphas -- both methods can land
-            # on slightly different alphas that hit the same target equally well.
             assert achieved_batched == pytest.approx(achieved_individual, abs=0.3)
 
     def test_clamps_consistently_with_single_target_search(self, real_audio):

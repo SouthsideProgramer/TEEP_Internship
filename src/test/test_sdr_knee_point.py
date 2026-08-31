@@ -17,18 +17,15 @@ def _curve(sdrs, accuracies):
 
 class TestFindKneePoint:
     def test_clean_crossing_is_interpolated(self):
-        # Accuracy rises monotonically with SDR, crossing 0.5 between 5 and 10 dB.
         curve = _curve([20, 15, 10, 5, 0], [0.9, 0.8, 0.6, 0.4, 0.2])
         result = find_knee_point(curve, no_separation_accuracy=0.5)
         assert result["status"] == "crossed"
-        # Linear interpolation between (10, 0.6) and (5, 0.4): crosses 0.5 at SDR=7.5.
         assert result["knee_sdr"] == pytest.approx(7.5)
         assert result["n_points"] == 5
 
     def test_exact_equality_at_a_point_still_resolves(self):
         curve = _curve([10, 5], [0.5, 0.5])
         result = find_knee_point(curve, no_separation_accuracy=0.5)
-        # accs == no_separation_accuracy counts as "above" (>=), so this is always_above.
         assert result["status"] == "always_above"
 
     def test_always_above_when_separation_never_loses(self):
@@ -42,13 +39,10 @@ class TestFindKneePoint:
         assert result == {"knee_sdr": None, "status": "always_below", "n_points": 5}
 
     def test_noisy_crossing_detected_distinctly(self):
-        # Below the reference at high SDR, above it at low SDR -- the
-        # opposite of the expected direction, so there's no clean
-        # high->low crossing, only a low->high one.
         curve = _curve([20, 15, 10, 5], [0.3, 0.3, 0.9, 0.9])
         result = find_knee_point(curve, no_separation_accuracy=0.5)
         assert result["status"] == "noisy_crossing"
-        assert result["knee_sdr"] == 15  # the point just before the low->high crossing
+        assert result["knee_sdr"] == 15
 
     def test_order_of_input_rows_does_not_matter(self):
         curve_sorted = _curve([20, 15, 10, 5, 0], [0.9, 0.8, 0.6, 0.4, 0.2])
@@ -80,14 +74,14 @@ class TestCompareKneePoints:
         arch1 = _knee_df({"Baseline 1": (10.0, "crossed")})
         arch2 = _knee_df({"Baseline 1": (11.5, "crossed")})
         result = compare_knee_points({"arch1": arch1, "arch2": arch2}, tolerance_db=3.0)
-        assert result.loc["Baseline 1", "agrees"] == True  # noqa: E712 -- np.bool_, not a Python bool
+        assert result.loc["Baseline 1", "agrees"] == True
         assert result.loc["Baseline 1", "knee_sdr_spread_db"] == pytest.approx(1.5)
 
     def test_disagrees_when_crossed_but_far_apart(self):
         arch1 = _knee_df({"Baseline 1": (10.0, "crossed")})
         arch2 = _knee_df({"Baseline 1": (2.0, "crossed")})
         result = compare_knee_points({"arch1": arch1, "arch2": arch2}, tolerance_db=3.0)
-        assert result.loc["Baseline 1", "agrees"] == False  # noqa: E712 -- np.bool_, not a Python bool
+        assert result.loc["Baseline 1", "agrees"] == False
         assert result.loc["Baseline 1", "knee_sdr_spread_db"] == pytest.approx(8.0)
 
     def test_inconclusive_when_one_side_has_no_clean_crossing(self):
@@ -99,7 +93,7 @@ class TestCompareKneePoints:
 
     def test_only_compares_baselines_present_in_every_backend(self):
         arch1 = _knee_df({"Baseline 1": (10.0, "crossed"), "Baseline 2": (5.0, "crossed")})
-        arch2 = _knee_df({"Baseline 1": (11.0, "crossed")})  # Baseline 2 missing
+        arch2 = _knee_df({"Baseline 1": (11.0, "crossed")})
         result = compare_knee_points({"arch1": arch1, "arch2": arch2})
         assert set(result.index) == {"Baseline 1"}
 

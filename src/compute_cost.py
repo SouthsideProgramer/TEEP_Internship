@@ -34,7 +34,7 @@ Usage:
 """
 import numpy as np
 
-N_SAMPLES = 60000  # this dataset's fixed recording length (15 s @ 4000 Hz)
+N_SAMPLES = 60000
 SAMPLE_RATE = 4000
 
 
@@ -46,10 +46,6 @@ def _stft_frame_count(n_samples: int, n_fft: int, hop_length: int) -> int:
 
     return librosa.stft(np.zeros(n_samples), n_fft=n_fft, hop_length=hop_length).shape[1]
 
-
-# ---------------------------------------------------------------------------
-# Baseline 1 -- bandpass (exact)
-# ---------------------------------------------------------------------------
 
 def bandpass_macs(n_samples: int = N_SAMPLES) -> dict:
     """
@@ -65,8 +61,8 @@ def bandpass_macs(n_samples: int = N_SAMPLES) -> dict:
     from baseline.common import HEART_BAND, LUNG_BAND
 
     order = 4
-    n_sections = -(-order // 2)  # ceil division
-    macs_per_band = n_samples * 5 * n_sections * 2  # 2 = forward+backward (filtfilt)
+    n_sections = -(-order // 2)
+    macs_per_band = n_samples * 5 * n_sections * 2
     n_bands = len([HEART_BAND, LUNG_BAND])
     return {
         "method": "Baseline 1 (bandpass)",
@@ -76,10 +72,6 @@ def bandpass_macs(n_samples: int = N_SAMPLES) -> dict:
         "notes": f"{n_sections} biquad sections/band x {n_bands} bands x fwd+back (filtfilt)",
     }
 
-
-# ---------------------------------------------------------------------------
-# Baselines 2 & 3 -- NMF (exact matrix-multiply shapes)
-# ---------------------------------------------------------------------------
 
 def _nmf_iteration_macs(f: int, k: int, t: int, supervised: bool) -> int:
     """
@@ -106,8 +98,8 @@ def supervised_nmf_macs(n_samples: int = N_SAMPLES, sr: int = SAMPLE_RATE) -> di
     k = K_HEART + K_LUNG
 
     activation_macs = ACTIVATION_ITERS * _nmf_iteration_macs(f, k, t, supervised=True)
-    reconstruction_macs = f * k * t  # heart_mag + lung_mag together span the full W (f x k) @ H (k x t)
-    params = k * f  # the frozen dictionary W: (F, K_HEART+K_LUNG)
+    reconstruction_macs = f * k * t
+    params = k * f
 
     return {
         "method": "Baseline 2 (supervised NMF)",
@@ -145,17 +137,13 @@ def standard_nmf_macs(n_samples: int = N_SAMPLES, sr: int = SAMPLE_RATE) -> dict
 
     return {
         "method": "Baseline 3 (standard NMF)",
-        "params": 0,  # nothing persisted across mixtures -- W/H are refit fresh every time
+        "params": 0,
         "macs_per_inference": nmf_macs + reconstruction_macs,
         "precision": "exact",
         "notes": f"F={f}, K={k}, T={t}, {STANDARD_NMF_ITERS} full (W+H) MU iters/mixture, "
                  "no persisted dictionary -- entirely transductive, see BACKLOG.md's B2-vs-B3 fairness note",
     }
 
-
-# ---------------------------------------------------------------------------
-# Baseline 4 -- MSSA (estimate: standard reduced-SVD FLOP formula)
-# ---------------------------------------------------------------------------
 
 def mssa_macs(n_samples: int = N_SAMPLES) -> dict:
     """
@@ -174,7 +162,7 @@ def mssa_macs(n_samples: int = N_SAMPLES) -> dict:
     L = SSA_WINDOW_LENGTH
     K = n_samples - L + 1
     svd_macs = 4 * L * L * K + 8 * L**3
-    total = 2 * svd_macs  # two SSA decompositions (stage 1 mixture, stage 2 residual)
+    total = 2 * svd_macs
 
     return {
         "method": "Baseline 4 (MSSA)",
@@ -184,10 +172,6 @@ def mssa_macs(n_samples: int = N_SAMPLES) -> dict:
         "notes": f"L={L}, K={K}, 2x reduced SVD (stage 1 + stage 2), ~4*L^2*K FLOP estimate",
     }
 
-
-# ---------------------------------------------------------------------------
-# Baseline 5 -- EVMD (estimate: ADMM elementwise-loop op count)
-# ---------------------------------------------------------------------------
 
 def evmd_macs(n_samples: int = N_SAMPLES) -> dict:
     """
@@ -212,13 +196,13 @@ def evmd_macs(n_samples: int = N_SAMPLES) -> dict:
     from baseline.baseline5 import EVMD_K_MAX, EVMD_K_MIN, EVMD_MAX_ITER
 
     half = n_samples // 2
-    t_ext = half + n_samples + half  # mirror-padding, baseline5._vmd
-    admm_ops_per_mode_per_sample = 8  # order-of-magnitude complex-arithmetic count, see docstring
+    t_ext = half + n_samples + half
+    admm_ops_per_mode_per_sample = 8
 
     total = 0
     for k in range(EVMD_K_MIN, EVMD_K_MAX + 1):
         total += EVMD_MAX_ITER * k * t_ext * admm_ops_per_mode_per_sample
-    fft_macs = 2 * (t_ext * np.log2(t_ext))  # forward + inverse, per attempted K (dominated by ADMM term regardless)
+    fft_macs = 2 * (t_ext * np.log2(t_ext))
     total += (EVMD_K_MAX - EVMD_K_MIN + 1) * fft_macs
 
     return {
@@ -230,10 +214,6 @@ def evmd_macs(n_samples: int = N_SAMPLES) -> dict:
                  f"K-selection finding), {EVMD_MAX_ITER} ADMM iters/K, T_ext={t_ext}",
     }
 
-
-# ---------------------------------------------------------------------------
-# Baseline 6 -- Conv-TasNet-lite (exact: measured from a real forward pass)
-# ---------------------------------------------------------------------------
 
 def convtasnet_params_and_macs(n_samples: int = N_SAMPLES) -> dict:
     """
@@ -284,10 +264,6 @@ def convtasnet_params_and_macs(n_samples: int = N_SAMPLES) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Condition A classifier -- MFCC + RBF-SVM (exact: measured from a real fit)
-# ---------------------------------------------------------------------------
-
 def classifier_params_and_macs(n_samples: int = N_SAMPLES, sr: int = SAMPLE_RATE) -> dict:
     """
     Real sklearn SVC, so support-vector count (its actual "parameter"
@@ -308,17 +284,11 @@ def classifier_params_and_macs(n_samples: int = N_SAMPLES, sr: int = SAMPLE_RATE
     n_features = int(svm.support_vectors_.shape[1])
 
     t = _stft_frame_count(n_samples, N_FFT, HOP_LENGTH)
-    # librosa's MFCC pipeline: mel spectrogram (STFT already counted
-    # elsewhere in this file for the NMF baselines; here it's this
-    # classifier's own cost) -> DCT. Approximated as O(n_fft * t) for the
-    # mel-filterbank matmul (n_mels ~ 128 x (n_fft/2+1) bins) + O(n_mfcc *
-    # n_mels * t) for the DCT -- both small next to RBF-kernel evaluation
-    # at inference, reported as a minor term.
     n_mels = 128
     f = N_FFT // 2 + 1
     mfcc_macs = n_mels * f * t + N_MFCC * n_mels * t
 
-    n_ovo_classifiers = 6  # C(4, 2) one-vs-one pairs for 4 class groups
+    n_ovo_classifiers = 6
     rbf_macs = n_support * n_features * n_ovo_classifiers
 
     return {

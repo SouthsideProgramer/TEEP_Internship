@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from load_dataset import load_hs, load_ls
 
 
@@ -53,35 +53,27 @@ def plot_mel_spectrograms(audio_files):
 
     Returns the created matplotlib Figure.
     """
-    # Set up the figure with 3 rows and 1 column using gridspec
-    fig = plt.figure(figsize=(8, 12))  # Adjust the figure size for vertical orientation
-    gs = gridspec.GridSpec(len(audio_files) + 1, 1, height_ratios=[1] * len(audio_files) + [0.05])  # Last row for the colorbar
+    fig = plt.figure(figsize=(8, 12))
+    gs = gridspec.GridSpec(len(audio_files) + 1, 1, height_ratios=[1] * len(audio_files) + [0.05])
 
     axs = [plt.subplot(gs[i]) for i in range(len(audio_files))]
 
-    # Plot spectrograms
     for i, (audio_path, title) in enumerate(audio_files):
-        # Load the audio file
         y, sr = librosa.load(audio_path)
 
-        # Generate the mel spectrogram
-        S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=2048)  # Limit frequency to 2048 Hz
+        S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=2048)
         S_dB = librosa.power_to_db(S, ref=np.max)
 
-        # Plot the spectrogram in the corresponding subplot
         img = librosa.display.specshow(S_dB, sr=sr, x_axis='time', y_axis='mel', fmax=2048, ax=axs[i])
 
-        # Set the title and axis labels
         axs[i].set_title(title)
         axs[i].set_xlabel('Time (s)')
         axs[i].set_ylabel('Frequency (Hz)')
 
-    # Add a color bar to the bottom of the last subplot
-    cbar_ax = plt.subplot(gs[len(audio_files)])  # Create a new axis for the colorbar
+    cbar_ax = plt.subplot(gs[len(audio_files)])
     fig.colorbar(img, cax=cbar_ax, format='%+2.0f dB', orientation='horizontal')
 
-    # Adjust layout
-    plt.tight_layout(rect=[0, 0, 1, 0.95])  # Leave space for the color bar on the bottom
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
 

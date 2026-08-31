@@ -36,26 +36,11 @@ BASELINE_SPECS = [
     ("Baseline 2 (supervised NMF)", make_supervised_nmf_baseline(seed=0), False),
     ("Baseline 3 (standard NMF)", make_standard_nmf_baseline(seed=0), False),
     ("Baseline 4 (MSSA)", fit_ssa_baseline, False),
-    # Baseline 5 (EVMD): its K=2..10 VMD sweep costs ~15s/row (see BACKLOG.md's
-    # 2026-08-24 entry for the measured timing) -- infeasible at the full
-    # full synthetic n (~1500 rows) within this session's timebox (~6 hours,
-    # extrapolated from the measured ~15s/row full K-sweep cost). Its
-    # synthetic column runs on a stratified subsample instead (see
-    # EVMD_SYNTHETIC_PER_STRATUM below); its native column still runs on the
-    # full 36 rows (cheap enough). This is a disclosed, reported n
-    # reduction, not a silent one -- the table states n for every cell.
     ("Baseline 5 (EVMD)", fit_evmd_baseline, True),
 ]
 
-EVMD_SYNTHETIC_PER_STRATUM = 5  # rows sampled per (fold, snr_db) stratum -> 5*5*5=125 rows
+EVMD_SYNTHETIC_PER_STRATUM = 5
 
-# Han & Quan, "Cardiorespiratory Sound Separation Using Singular Spectrum
-# Analysis," 2025 ICSPS, Table I -- their own 50-pair synthetic set (10
-# cardiac x 5 respiratory, +2% RMS Gaussian noise), their own hyperparameters.
-# Confirmed directly from the primary source (papers/Cardiorespiratory_
-# Sound_Separation_Using_Singular_Spectrum_Analysis.pdf, Table I, p.734).
-# SDR in dB, correlation in %. No SIR/SAR reported -- that paper only
-# reports SDR, STOI, and correlation.
 HAN_QUAN_TABLE_I = {
     "Baseline 1 (bandpass)": {
         "heart_sdr": 5.7, "lung_sdr": -5.7, "heart_corr": 91.4, "lung_corr": 29.7,
@@ -73,7 +58,7 @@ HAN_QUAN_TABLE_I = {
         "heart_sdr": 26.4, "lung_sdr": 5.3, "heart_corr": 99.2, "lung_corr": 80.5,
         "note": "Table I \"MSSA\" row -- their own proposed method, direct match to this baseline's method.",
     },
-    "Baseline 5 (EVMD)": None,  # not that paper's method
+    "Baseline 5 (EVMD)": None,
 }
 
 
@@ -131,7 +116,7 @@ def _build_table(synthetic_df: pd.DataFrame, evmd_synthetic_df: pd.DataFrame, va
             for metric in ("sdr", "sir", "sar"):
                 m, ci, _n = _mean_ci95(synth_src[metric].values)
                 row[f"synthetic_{metric}"] = _fmt_mean_ci(m, ci)
-                row[f"_synthetic_{metric}_mean"] = m  # kept for the gap table below, stripped before rendering
+                row[f"_synthetic_{metric}_mean"] = m
             for metric in ("sdr", "sir", "sar"):
                 m, ci, _n = _mean_ci95(native_src[metric].values)
                 row[f"native_{metric}"] = _fmt_mean_ci(m, ci)

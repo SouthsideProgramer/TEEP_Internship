@@ -18,9 +18,6 @@ class TestSyntheticClosedForm:
     """Construct heart/lung/mixed signals with a known-true answer, independent of any real dataset copy."""
 
     def _write_row(self, tmp_path, name, heart, lung, mixed, sr=4000):
-        # subtype="FLOAT": these signals aren't scaled to fit [-1, 1] (mixed
-        # in particular can exceed it), and this test is about verify_additive_triplets()'s
-        # math, not 16-bit PCM quantization/clipping behavior.
         heart_path, lung_path, mixed_path = (tmp_path / f"{name}_{part}.wav" for part in ("h", "l", "m"))
         sf.write(heart_path, heart.astype(np.float32), sr, subtype="FLOAT")
         sf.write(lung_path, lung.astype(np.float32), sr, subtype="FLOAT")
@@ -36,7 +33,7 @@ class TestSyntheticClosedForm:
         rng = np.random.default_rng(0)
         heart = rng.standard_normal(4000) * 0.1
         lung = rng.standard_normal(4000) * 0.1
-        mixed = 2.5 * (heart + lung)  # a genuine scaled sum, gain a=2.5
+        mixed = 2.5 * (heart + lung)
 
         row = self._write_row(tmp_path, "M_good", heart, lung, mixed)
         result = verify_additive_triplets(pd.DataFrame([row]))
@@ -50,7 +47,7 @@ class TestSyntheticClosedForm:
         rng = np.random.default_rng(1)
         heart = rng.standard_normal(4000) * 0.1
         lung = rng.standard_normal(4000) * 0.1
-        mixed = rng.standard_normal(4000) * 0.1  # independent signal, not derived from heart/lung at all
+        mixed = rng.standard_normal(4000) * 0.1
 
         row = self._write_row(tmp_path, "M_bad", heart, lung, mixed)
         result = verify_additive_triplets(pd.DataFrame([row]))
@@ -63,7 +60,7 @@ class TestSyntheticClosedForm:
         rng = np.random.default_rng(2)
         heart = rng.standard_normal(4000) * 0.1
         lung = rng.standard_normal(4000) * 0.1
-        noise = rng.standard_normal(4000) * 0.01  # small perturbation, not exact
+        noise = rng.standard_normal(4000) * 0.01
         mixed = (heart + lung) + noise
 
         row = pd.DataFrame([self._write_row(tmp_path, "M_noisy", heart, lung, mixed)])

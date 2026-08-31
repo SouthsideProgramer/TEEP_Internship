@@ -1034,6 +1034,80 @@ adding load during an already heavily-contended session. All passing.
 per-method latency numbers and the recorded machine load at measurement
 time -- `results/latency_report.html` has the full breakdown.
 
+## sdr_compute_plane.py
+
+Places every separation baseline's real, already-measured quality (heart
+SDR, native additive 36-row subset, pooled 95% CI) against its
+already-measured compute cost -- `compute_cost.py`'s MACs and
+`latency.py`'s desktop wall-clock latency -- on one plane, so a reader can
+see quality and cost together rather than in two separate tables. No new
+audio processing happens here beyond a fresh, cheap `compute_macs()` call
+(matrix-shape arithmetic, not a real forward pass except Baseline 6's) --
+SDR and latency are both reused as-is from their own already-published
+reports, since SDR is a stable property of a fixed-seed method on a fixed
+dataset (no reason to re-measure) while latency is sensitive to machine
+load at measurement time (a fresh re-measurement would cost as much
+wall-clock time as the original and add no new information over reusing
+the already-real, already-disclosed number).
+
+**Two panels, not one collapsed axis**: `latency.py` already found MACs
+and measured latency diverging substantially for Conv-TasNet-lite
+(second-highest MACs, lowest latency -- an implementation-efficiency
+effect, not a computation-cost one), so collapsing to a single compute
+axis here would hide exactly the divergence already found once. Plotting
+both separately lets that divergence show up again if it's real, rather
+than assuming it away.
+
+**Pareto dominance** (`is_pareto_dominated()`): baseline A is dominated on
+a given axis if some baseline B has equal-or-better SDR *and*
+equal-or-lower compute cost, with at least one strict inequality -- A is
+then never the right choice on that axis, regardless of how quality and
+cost are weighted against each other. Marked with hollow markers in the
+plot (`plot_sdr_compute_plane()`) so a reader can see at a glance which
+methods are strictly worse choices, not just visually lower/righter.
+
+**Baseline 6's SDR, hardcoded and cross-checked, not re-measured on every
+run**: `SDR_HEART_DB` holds Baselines 1-5's numbers as already published
+in `results/first_sdr_sir_sar_table.html` (2026-08-24). Baseline 6
+postdates that report, so it needed its own measurement
+(`measure_baseline6_sdr()`, in the identical pooled-95%-CI convention via
+`eval_harness.cross_validate` over the 36-row additive subset). That
+measurement was run fresh this session and reproduced
+`baseline6_report.py`'s already-published 2026-08-25 figure exactly
+(5.15 +/- 2.74 dB) -- a genuine independent cross-check that the two
+reports use the same pooled-CI convention, not a coincidence of rounding,
+since some other PROTOCOL.md tables use a different fold-level
+mean +/- std convention for the same baseline. With that confirmed, the
+value is hardcoded into `SDR_HEART_DB` alongside Baselines 1-5, the same
+treatment every other baseline already gets -- `measure_baseline6_sdr()`
+itself is kept in the module (not deleted) as the function that produced
+and can reproduce that number, but `__main__` no longer calls it on every
+run.
+
+**Real measured result** (`results/sdr_compute_plane_report.html` +
+`results/plots/sdr_compute_plane.png`): on the MACs plane, bandpass
+(Baseline 1) dominates every other baseline outright -- highest SDR *and*
+lowest MACs by nearly three orders of magnitude, so every other method is
+Pareto-dominated; if MACs were the only compute figure available, there
+would be no evidence-based reason to prefer any learned or iterative
+method over the zero-training filter. On the measured-latency plane, that
+conclusion does not survive: bandpass and Conv-TasNet-lite are *both*
+non-dominated (bandpass has the higher SDR, Conv-TasNet-lite has the
+lower latency -- a genuine trade-off, not a strict win for either), while
+every other baseline stays dominated on both planes. This is the concrete
+worked example of `latency.py`'s own MACs-vs-latency divergence finding: a
+plane built from MACs alone would have hidden Conv-TasNet-lite's real
+competitiveness entirely.
+
+`test/test_sdr_compute_plane.py` (6 tests, pure arithmetic over synthetic
+dicts -- doesn't depend on which real numbers this project happens to have
+measured): strictly-worse-on-both-axes is dominated, a genuine trade-off
+(better on one axis, worse on the other) is not dominated, identical
+values on both axes are not dominated, equal SDR with strictly better
+compute is dominated, a three-method case where the middle one is
+dominated by either extreme, and a method is never compared against
+itself. All passing.
+
 ## statistics/audio_quality.py
 
 Audio quality + per-class/per-location statistics for the HLS-CMDS dataset.

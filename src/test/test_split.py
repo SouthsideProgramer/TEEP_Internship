@@ -46,7 +46,7 @@ class TestFoldAssignment:
 
     def test_folds_are_reasonably_balanced(self, mix_df):
         sizes = mix_df.groupby("fold").size()
-        assert sizes.min() >= len(mix_df) // 5 - 10  # loose bound; largest leak group is 32/145 rows
+        assert sizes.min() >= len(mix_df) // 5 - 10
 
     def test_reproducible_with_same_seed(self):
         a = assign_folds(n_folds=5, seed=42)
@@ -79,7 +79,6 @@ class TestDictionaryPoolNoLeakage:
         """Recordings not reused in the held-out fold's mixtures should stay in the pool."""
         hs_df, ls_df = hs_ls
         hs_allowed, ls_allowed = dictionary_pool(hs_df, ls_df, mix_df, held_out_fold=0)
-        # some rows are always excluded (fold 0 reuses some HS/LS recordings), but not all
         assert 0 < len(hs_allowed) < len(hs_df)
         assert 0 < len(ls_allowed) < len(ls_df)
 
@@ -92,8 +91,7 @@ class TestCrossValidationHarness:
         results_df, fold_summary, cv_summary = cross_validate(passthrough, n_folds=5, seed=0)
 
         assert set(results_df["Mixed Sound ID"]) == set(load_mix()["Mixed Sound ID"])
-        assert len(results_df) == len(load_mix()) * 2  # heart + lung per row
-        # each (Mixed Sound ID, source) pair appears exactly once, in exactly one fold
+        assert len(results_df) == len(load_mix()) * 2
         counts = results_df.groupby(["Mixed Sound ID", "source"])["fold"].nunique()
         assert (counts == 1).all()
 
@@ -109,7 +107,6 @@ class TestCrossValidationHarness:
 
         hs_total, ls_total = len(load_hs()), len(load_ls())
         assert len(seen_pool_sizes) == 5
-        # every fold's pool must be smaller than the full HS/LS set (some overlap always exists)
         assert all(n_hs < hs_total and n_ls < ls_total for n_hs, n_ls in seen_pool_sizes)
 
     def test_aggregate_by_fold_matches_manual_groupby(self):

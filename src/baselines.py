@@ -49,14 +49,10 @@ def fit_raw_mixture_baseline(_hs_allowed, _ls_allowed):
     return raw_mixture_separate
 
 
-# --- SSA-paper-style synthetic evaluation set -------------------------------
-
-SYNTHETIC_N_HEART = 10           # Sec. III: "10 random select cardiac"
-SYNTHETIC_N_LUNG = 5             # Sec. III: "5 random select respiratory"
-SYNTHETIC_NOISE_RMS_FRAC = 0.02  # Sec. III: "2% of the RMS value of the combined signal"
-SYNTHETIC_SEED = 0               # this project's own choice -- the paper doesn't
-                                  # say which 10/5 recordings it picked, so this
-                                  # set is reproducible but not literally theirs
+SYNTHETIC_N_HEART = 10
+SYNTHETIC_N_LUNG = 5
+SYNTHETIC_NOISE_RMS_FRAC = 0.02
+SYNTHETIC_SEED = 0
 
 
 def _rms(x: np.ndarray) -> float:

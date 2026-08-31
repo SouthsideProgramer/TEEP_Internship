@@ -15,10 +15,10 @@ import numpy as np
 
 from baseline.common import _peak_frequency
 
-SSA_WINDOW_LENGTH = 50           # L, Sec. II.A
-SSA_CARDIAC_SPLIT_HZ = 250.0     # Sec. II.B
-SSA_EIGENVALUE_THRESHOLD_PCT = 100.0 / SSA_WINDOW_LENGTH  # 2% at L=50, Sec. II.B
-SSA_CORRELATION_THRESHOLD = 0.50  # Sec. II.B
+SSA_WINDOW_LENGTH = 50
+SSA_CARDIAC_SPLIT_HZ = 250.0
+SSA_EIGENVALUE_THRESHOLD_PCT = 100.0 / SSA_WINDOW_LENGTH
+SSA_CORRELATION_THRESHOLD = 0.50
 
 
 def _diagonal_average_weights(L: int, K: int) -> np.ndarray:
@@ -45,7 +45,7 @@ def _ssa_decompose(y: np.ndarray, L: int):
     """
     T = len(y)
     K = T - L + 1
-    X = np.lib.stride_tricks.sliding_window_view(y, K)[:L]  # L x K trajectory matrix
+    X = np.lib.stride_tricks.sliding_window_view(y, K)[:L]
     U, S, Vt = np.linalg.svd(X, full_matrices=False)
     d = len(S)
     weights = _diagonal_average_weights(L, K)
@@ -59,7 +59,6 @@ def _ssa_decompose(y: np.ndarray, L: int):
 
 def mssa_separate(mixed: np.ndarray, sr: int):
     """separate_fn(mixed, sr) -> (heart_est, lung_est), the MSSA two-stage algorithm."""
-    # Stage 1: cardiac extraction from the raw mixture.
     rcs1, _ = _ssa_decompose(mixed, SSA_WINDOW_LENGTH)
     peak_freqs = np.array([_peak_frequency(rc, sr) for rc in rcs1])
     is_cardiac = peak_freqs <= SSA_CARDIAC_SPLIT_HZ
@@ -67,7 +66,6 @@ def mssa_separate(mixed: np.ndarray, sr: int):
     heart_est = rcs1[is_cardiac].sum(axis=0)
     residual = rcs1[~is_cardiac].sum(axis=0)
 
-    # Stage 2: respiratory refinement from the stage-1 residual.
     rcs2, eigenvalues2 = _ssa_decompose(residual, SSA_WINDOW_LENGTH)
     relative_variance = eigenvalues2 / eigenvalues2.sum() * 100.0
     is_selected = relative_variance >= SSA_EIGENVALUE_THRESHOLD_PCT

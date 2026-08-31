@@ -49,9 +49,6 @@ class TestClassGroupMapping:
         assert set(hs_df["class_group"].unique()) == set(CLASS_GROUPS)
 
     def test_group_sizes_match_the_documented_decision(self, hs_df):
-        # These are the exact counts the class-grouping decision (module
-        # docstring) was justified against -- if HS.csv changes, this should
-        # fail loudly rather than silently drift from the written rationale.
         counts = hs_df["class_group"].value_counts()
         assert counts["Normal"] == 9
         assert counts["Murmur"] == 24
@@ -102,7 +99,7 @@ class TestFeatures:
         hs_df = load_hs()
         y, sr = load_audio(hs_df.loc[0, "audio_path"], sr=None)
         feats = extract_features(y, sr)
-        assert feats.shape == (26,)  # 13 MFCCs x (mean, std)
+        assert feats.shape == (26,)
         assert np.all(np.isfinite(feats))
 
 

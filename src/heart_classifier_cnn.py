@@ -64,11 +64,11 @@ from heart_classifier import CLASS_GROUPS, aggregate_ci95, assign_classifier_fol
 from load_dataset import load_audio
 
 N_MELS = 40
-N_FFT = 512       # same STFT window as heart_classifier.py / baseline2.py, for consistency
+N_FFT = 512
 HOP_LENGTH = 256
 RANDOM_SEED = 0
-MAX_EPOCHS = 40   # first working configuration, not tuned -- same disclosed-scope framing
-LEARNING_RATE = 1e-3  # as Baseline 6 and heart_classifier.py's own architecture choices
+MAX_EPOCHS = 40
+LEARNING_RATE = 1e-3
 
 
 def extract_features(y: np.ndarray, sr: int) -> np.ndarray:
@@ -127,12 +127,11 @@ class CNNClassifier:
         label_to_idx = {label: i for i, label in enumerate(self.class_labels)}
         y_idx = np.array([label_to_idx[label] for label in y])
 
-        # Class-balanced loss weighting -- matches Architecture 1's class_weight='balanced'.
         counts = np.bincount(y_idx, minlength=len(self.class_labels)).astype(np.float32)
         weights = torch.tensor(counts.sum() / np.maximum(counts, 1), dtype=torch.float32)
         weights = weights / weights.sum() * len(self.class_labels)
 
-        X_t = torch.tensor(np.asarray(X), dtype=torch.float32).unsqueeze(1)  # (N, 1, N_MELS, T)
+        X_t = torch.tensor(np.asarray(X), dtype=torch.float32).unsqueeze(1)
         y_t = torch.tensor(y_idx, dtype=torch.long)
 
         self.model = _ShallowCNN(n_classes=len(self.class_labels))

@@ -43,14 +43,14 @@ def tiny_sweep(tiny_mix_df, tmp_path_factory):
 class TestMeasureAccuracyAtEachSdrPoint:
     def test_only_heart_rows_are_measured(self, tiny_sweep, tiny_mix_df, tmp_path):
         sweep_df, cache_root = tiny_sweep
-        assert (sweep_df["source"] == "lung").any()  # sanity: the sweep does contain lung rows
+        assert (sweep_df["source"] == "lung").any()
 
         out_path = tmp_path / "results.csv"
         results_df = measure_accuracy_at_each_sdr_point(
             sweep_df=sweep_df, n_folds=2, seed=0, cache_root=cache_root, out_path=out_path,
             resume=False, mix_df=tiny_mix_df,
         )
-        expected_n = len(tiny_mix_df) * len(TARGET_SDR_GRID_DB)  # heart-source rows only
+        expected_n = len(tiny_mix_df) * len(TARGET_SDR_GRID_DB)
         assert len(results_df) == expected_n
         assert results_df["correct"].isin([True, False]).all()
 
@@ -76,7 +76,6 @@ class TestResumeBehavior:
             resume=False, mix_df=tiny_mix_df,
         )
 
-        # Simulate an interrupted run: keep only the first half of the checkpoint.
         partial = full.iloc[: len(full) // 2]
         partial.to_csv(out_path, index=False)
 
@@ -97,7 +96,6 @@ class TestResumeBehavior:
         )
 
         assert len(resumed) == len(full)
-        # Only the missing (second) half should have triggered new work.
         assert len(calls) == len(full) - len(partial)
 
     def test_resumed_results_match_a_fresh_full_run(self, tiny_sweep, tiny_mix_df, tmp_path):
@@ -128,8 +126,6 @@ class TestFoldConsistencyCheck:
     def test_raises_on_a_fold_mismatch(self, tiny_sweep, tiny_mix_df, tmp_path):
         sweep_df, cache_root = tiny_sweep
         tampered = sweep_df.copy()
-        # Corrupt one row's recorded fold so it disagrees with the
-        # independently recomputed classifier fold basis.
         tampered.loc[tampered.index[0], "fold"] = -999
 
         with pytest.raises(AssertionError, match="fold mismatch"):
@@ -147,7 +143,7 @@ class TestSummarizeAccuracyCurve:
             resume=False, mix_df=tiny_mix_df,
         )
         curve_df = summarize_accuracy_curve(results_df)
-        assert len(curve_df) == len(TARGET_SDR_GRID_DB)  # one baseline x len(grid) target points
+        assert len(curve_df) == len(TARGET_SDR_GRID_DB)
         assert curve_df["accuracy"].between(0, 1).all()
 
         for _, row in curve_df.iterrows():

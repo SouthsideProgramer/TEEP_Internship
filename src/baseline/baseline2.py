@@ -27,26 +27,16 @@ import pandas as pd
 
 from baseline.common import _bandpass
 
-K_LUNG = 20    # Kr in the paper
-K_HEART = 10   # Ki in the paper
-DICT_ITERS = 100        # MU iterations to fit each fixed dictionary
-ACTIVATION_ITERS = 60   # MU iterations to solve activations on a held-out mixture
+K_LUNG = 20
+K_HEART = 10
+DICT_ITERS = 100
+ACTIVATION_ITERS = 60
 
-N_FFT = 512       # 128 ms window at this dataset's 4000 Hz sample rate
-HOP_LENGTH = 256  # 64 ms hop -- Sec. 3.2.3 of the paper: "512-sample analysis window,
-                  # 256-sample hop size, and a 512-point FFT" (confirmed from the
-                  # primary source; this project previously used 128 unverified)
-DENOISE_BAND = (50.0, 1800.0)  # Hz -- Sec. 3.2.1: "a fourth-order Butterworth bandpass
-                                # filter with cut-off frequencies of 50 Hz and 1800 Hz,"
-                                # applied to every snippet before STFT/NMF, to suppress
-                                # baseline drift and high-frequency acquisition noise.
-                                # This was missing from the initial reproduction here --
-                                # added to match the paper's actual pipeline order
-                                # (denoise -> STFT -> NMF), not just its NMF math.
-_EPS = 1e-12      # matches the paper's Eq. 3 (V = |S| + epsilon, epsilon = 1e-12)
-_H_INIT_FLOOR = 1e-3  # Sec. 3.2.4: "H was initialized with random non-negative
-                      # values lower bounded by 10^-3" -- for the activation-solving
-                      # (frozen-dictionary) phase specifically
+N_FFT = 512
+HOP_LENGTH = 256
+DENOISE_BAND = (50.0, 1800.0)
+_EPS = 1e-12
+_H_INIT_FLOOR = 1e-3
 
 
 def _nmf_kl(V: np.ndarray, k: int, iters: int, rng: np.random.Generator, W_init: np.ndarray | None = None):

@@ -15,7 +15,7 @@ from baseline.baseline5 import _energy_loss_coefficient, _normalized_permutation
 @pytest.fixture(scope="module")
 def two_tone_signal():
     sr = 4000
-    t = np.arange(0, 3, 1 / sr)  # short (3s, not this dataset's 15s) -- keeps the test fast
+    t = np.arange(0, 3, 1 / sr)
     rng = np.random.default_rng(0)
     low = np.sin(2 * np.pi * 80 * t)
     high = 0.5 * np.sin(2 * np.pi * 400 * t)
@@ -49,13 +49,13 @@ class TestNormalizedPermutationEntropy:
         t = np.arange(0, 3, 1 / 4000)
         pure_tone = np.sin(2 * np.pi * 100 * t)
         npe = _normalized_permutation_entropy(pure_tone)
-        assert 0.0 <= npe < 0.3  # highly regular/periodic -> few distinct ordinal patterns
+        assert 0.0 <= npe < 0.3
 
     def test_white_noise_has_high_entropy(self):
         rng = np.random.default_rng(0)
         noise = rng.normal(size=12000)
         npe = _normalized_permutation_entropy(noise)
-        assert npe > 0.9  # near-maximal -- every ordinal pattern roughly equally likely
+        assert npe > 0.9
 
     def test_bounded_in_unit_interval(self, two_tone_signal):
         signal, _sr = two_tone_signal

@@ -27,7 +27,7 @@ import numpy as np
 from baseline.baseline2 import ACTIVATION_ITERS, DENOISE_BAND, DICT_ITERS, HOP_LENGTH, K_HEART, K_LUNG, N_FFT, _EPS, _nmf_kl
 from baseline.common import _bandpass
 
-STANDARD_NMF_ITERS = DICT_ITERS + ACTIVATION_ITERS  # same total MU-update budget as Baseline 2's two phases combined
+STANDARD_NMF_ITERS = DICT_ITERS + ACTIVATION_ITERS
 
 
 def make_standard_nmf_baseline(seed: int = 0):

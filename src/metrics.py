@@ -123,9 +123,6 @@ def summarize_by_class(results_df: pd.DataFrame, source: str, class_col: str) ->
 if __name__ == "__main__":
     from report_utils import df_to_html, report_shell, results_dir, section, stat_tile, write_report
 
-    # Smoke test against real dataset audio: two baselines with known-sane behavior.
-    #   - identity separation (est == ref)   -> SDR/SIR/SAR should be very high (~inf)
-    #   - mixed signal used as both estimates -> SDR should be low/negative (no separation at all)
     print("Running metrics smoke test against real dataset audio...")
     mix_df = load_mix()
     row = mix_df.iloc[0]

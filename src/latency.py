@@ -46,7 +46,7 @@ import numpy as np
 
 N_TRIALS = 5
 N_WARMUP = 1
-N_TRIALS_SLOW = 3  # EVMD's own K-sweep is expensive per call -- fewer reps, same protocol shape
+N_TRIALS_SLOW = 3
 
 
 def time_calls(fn, n_trials: int = N_TRIALS, n_warmup: int = N_WARMUP) -> dict:
@@ -88,14 +88,14 @@ def measure_bandpass_latency(mixed: np.ndarray, sr: int) -> dict:
 def measure_supervised_nmf_latency(mixed: np.ndarray, sr: int, hs_small, ls_small) -> dict:
     from baseline.baseline2 import make_supervised_nmf_baseline
 
-    separate_fn = make_supervised_nmf_baseline(seed=0)(hs_small, ls_small)  # dictionary fit once, untimed
+    separate_fn = make_supervised_nmf_baseline(seed=0)(hs_small, ls_small)
     return {"method": "Baseline 2 (supervised NMF)", **time_calls(lambda: separate_fn(mixed, sr))}
 
 
 def measure_standard_nmf_latency(mixed: np.ndarray, sr: int) -> dict:
     from baseline.baseline3 import make_standard_nmf_baseline
 
-    separate_fn = make_standard_nmf_baseline(seed=0)(None, None)  # hs/ls unused, per this baseline's own contract
+    separate_fn = make_standard_nmf_baseline(seed=0)(None, None)
     return {"method": "Baseline 3 (standard NMF)", **time_calls(lambda: separate_fn(mixed, sr))}
 
 
@@ -108,20 +108,12 @@ def measure_mssa_latency(mixed: np.ndarray, sr: int) -> dict:
 def measure_evmd_latency(mixed: np.ndarray, sr: int) -> dict:
     from baseline.baseline5 import evmd_separate
 
-    # Fewer reps (N_TRIALS_SLOW): EVMD's own K=2..10 sweep already costs
-    # ~15s/call by itself (BACKLOG.md's own measured figure) -- same
-    # protocol shape (warm-up + timed repetitions, median+IQR), just fewer
-    # of them so this doesn't add disproportionate load to an already
-    # contended machine.
     return {"method": "Baseline 5 (EVMD)", **time_calls(lambda: evmd_separate(mixed, sr), n_trials=N_TRIALS_SLOW)}
 
 
 def measure_convtasnet_latency(mixed: np.ndarray, sr: int, hs_small, ls_small) -> dict:
     from convtasnet import make_convtasnet_baseline
 
-    # Reduced training config (matches test_convtasnet.py's own testability
-    # pattern): training quality doesn't affect *inference* speed, only
-    # setup cost, which is untimed here anyway.
     separate_fn = make_convtasnet_baseline(seed=0, max_epochs=2, steps_per_epoch=3, batch_size=2)(hs_small, ls_small)
     return {"method": "Baseline 6 (Conv-TasNet-lite)", **time_calls(lambda: separate_fn(mixed, sr))}
 
@@ -130,7 +122,7 @@ def measure_classifier_latency(y: np.ndarray, sr: int) -> dict:
     from heart_classifier import assign_classifier_folds, predict_one, train_fold_classifiers
 
     hs_df = assign_classifier_folds(n_folds=5, seed=0)
-    classifiers = train_fold_classifiers(hs_df, n_folds=5)  # fit once, untimed
+    classifiers = train_fold_classifiers(hs_df, n_folds=5)
     clf = classifiers[0]
     return {"method": "Condition A classifier (MFCC + SVM)", **time_calls(lambda: predict_one(clf, y, sr))}
 

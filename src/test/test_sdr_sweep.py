@@ -87,17 +87,12 @@ class TestSynthesizeSweepRow:
         heart_arg = degraded if row["source"] == "heart" else heart_ref
         lung_arg = degraded if row["source"] == "lung" else lung_ref
         remeasured = evaluate_heart_lung(heart_ref, lung_ref, heart_arg, lung_arg)[row["source"]]["sdr"]
-        # Loose tolerance: the cached estimate round-trips through 16-bit PCM
-        # (soundfile's WAV default), same quantization every other cached
-        # .wav in this project already tolerates (e.g. verify_additive_
-        # triplets' own 1e-3 relative-residual threshold).
         assert remeasured == pytest.approx(row["achieved_sdr"], abs=0.1)
 
     def test_alpha_zero_reconstructs_ground_truth_exactly(self, tiny_mix_df, tmp_path):
         heart_ref, sr = load_audio(tiny_mix_df.iloc[0]["heart_audio_path"], sr=None)
         (tmp_path / "Baseline1").mkdir()
         mixed_id = tiny_mix_df.iloc[0]["Mixed Sound ID"]
-        # The cached "estimate" is arbitrary here -- alpha=0 should ignore it entirely.
         sf.write(tmp_path / "Baseline1" / f"{mixed_id}_heart.wav", heart_ref * 0.1, sr)
 
         row = pd.Series({"mixed_id": mixed_id, "source": "heart", "baseline": "Baseline 1 (bandpass)", "alpha": 0.0})
@@ -106,12 +101,20 @@ class TestSynthesizeSweepRow:
 
 
 class TestBuildProvenanceFromCache:
-    def test_matches_build_sdr_sweep_exactly_on_the_same_cache(self, tiny_mix_df, tmp_path):
+    def test_matches_build_sdr_sweep_on_the_same_cache(self, tiny_mix_df, tmp_path):
         """The whole point of this function: reading back an already-cached
         estimate and recomputing the target grid must reproduce
-        build_sdr_sweep()'s own provenance rows exactly, not approximately
-        -- it's the same computation, just skipping the (here, already-done)
-        separation step."""
+        build_sdr_sweep()'s own provenance rows -- up to 16-bit WAV
+        quantization, not bit-for-bit. build_sdr_sweep() runs the target-grid
+        search against separate_fn()'s original in-memory float estimate;
+        build_provenance_from_cache() reads that same estimate back from the
+        cached .wav file, which is inherently a 16-bit PCM quantization of
+        it -- the exact same round-trip precision limit
+        test_alpha_zero_reconstructs_ground_truth_exactly() and
+        test_reconstruction_matches_recorded_sdr() above already tolerate
+        for the same reason. Real-world tolerance measured on this test:
+        alpha/SDR/SIR/SAR values agree to within ~0.001 (of a value on the
+        order of 1-25), not to machine precision."""
         cache_root = tmp_path
         original = build_sdr_sweep(
             n_folds=2, seed=0, mix_df=tiny_mix_df,
@@ -127,7 +130,15 @@ class TestBuildProvenanceFromCache:
         key_cols = ["baseline", "mixed_id", "source", "target_sdr"]
         original_sorted = original.sort_values(key_cols).reset_index(drop=True)
         rebuilt_sorted = rebuilt.sort_values(key_cols).reset_index(drop=True)
-        pd.testing.assert_frame_equal(original_sorted, rebuilt_sorted, check_like=True)
+
+        exact_cols = ["baseline", "mixed_id", "source", "target_sdr", "fold", "clamped_to_baseline_floor"]
+        pd.testing.assert_frame_equal(original_sorted[exact_cols], rebuilt_sorted[exact_cols])
+
+        for col in ["alpha", "achieved_sdr", "achieved_sir", "achieved_sar"]:
+            np.testing.assert_allclose(
+                original_sorted[col].to_numpy(), rebuilt_sorted[col].to_numpy(), atol=0.01, rtol=0,
+                err_msg=f"column {col!r} diverged by more than the expected 16-bit WAV quantization tolerance",
+            )
 
     def test_assigns_folds_when_missing_from_mix_df(self, tiny_mix_df, tmp_path):
         cache_root = tmp_path
@@ -136,7 +147,6 @@ class TestBuildProvenanceFromCache:
             baseline_specs=[("Baseline 1 (bandpass)", fit_bandpass_baseline)],
             cache_root=cache_root,
         )
-        # Pass mix_df *without* a 'fold' column -- should compute it internally.
         rebuilt = build_provenance_from_cache(
             tiny_mix_df, ["Baseline 1 (bandpass)"], cache_root=cache_root, n_folds=2, seed=0
         )

@@ -22,19 +22,6 @@ import pandas as pd
 SYNTHETIC_MIX_N_FOLDS = 5
 SYNTHETIC_SEED = 0
 
-# S1-09: noise sweep. Matches Han & Quan's noise *type* (additive Gaussian,
-# RMS-relative to the mixed signal) but diverges deliberately on *level*:
-# they fix 2% RMS (a single point, ~34 dB SNR -- 20*log10(1/0.02) = 33.98 dB);
-# a fixed level can't produce the continuous, controllable difficulty axis
-# C2's SDR-vs-accuracy "knee point" analysis needs. 35 dB is this sweep's
-# closest point to their condition.
-#
-# 3 levels (not a finer sweep): measured per-row cost across the 5 methods
-# (see BACKLOG.md's 2026-08-24 entry) makes a 5-level sweep (n=2500) a
-# multi-hour run; 3 levels (n=1500) keeps a real hard/medium/easy difficulty
-# axis while fitting this session's timebox. A disclosed compute-driven
-# scope reduction, not a silent one -- revisit if C2's actual knee-point
-# analysis needs finer resolution later.
 SNR_SWEEP_DB = (-5.0, 15.0, 35.0)
 SNR_DB_CLOSEST_TO_HAN_QUAN = 35.0
 

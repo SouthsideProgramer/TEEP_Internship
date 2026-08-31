@@ -23,7 +23,6 @@ from compute_cost import (
 class TestBandpassMacs:
     def test_formula_on_a_small_case(self):
         result = bandpass_macs(n_samples=100)
-        # order=4 -> 2 biquad sections, 5 MACs/sample/section, x2 (fwd+back), x2 bands.
         assert result["macs_per_inference"] == 100 * 5 * 2 * 2 * 2
         assert result["params"] == 0
         assert result["precision"] == "exact"
@@ -81,8 +80,6 @@ class TestMssaMacs:
         assert result["precision"] == "estimate"
 
     def test_scales_roughly_linearly_with_n_samples_for_large_n(self):
-        # K ~ n_samples dominates for L << n_samples, so cost should scale
-        # roughly linearly with n_samples at this scale.
         small = mssa_macs(n_samples=60000)["macs_per_inference"]
         large = mssa_macs(n_samples=120000)["macs_per_inference"]
         assert large == pytest.approx(2 * small, rel=0.05)
@@ -97,7 +94,6 @@ class TestEvmdMacs:
         t_ext = half + n_samples + half
         admm_total = sum(EVMD_MAX_ITER * k * t_ext * 8 for k in range(EVMD_K_MIN, EVMD_K_MAX + 1))
         result = evmd_macs(n_samples=n_samples)
-        # ADMM term should dominate and be a lower bound on the reported total (FFT term adds a bit more).
         assert result["macs_per_inference"] >= admm_total
         assert result["macs_per_inference"] == pytest.approx(admm_total, rel=0.05)
 
@@ -124,7 +120,6 @@ class TestConvTasNetMacsAndParams:
         assert result["params"] == expected
 
     def test_param_count_is_in_the_previously_measured_ballpark(self):
-        # BACKLOG.md's Baseline 6 entry independently reports ~325K params.
         result = convtasnet_params_and_macs()
         assert 300_000 <= result["params"] <= 350_000
 

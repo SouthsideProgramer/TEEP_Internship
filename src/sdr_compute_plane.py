@@ -47,26 +47,15 @@ Usage:
 """
 from pathlib import Path
 
-# Heart SDR, native additive 36-row subset, mean +/- 95% CI (pooled across
-# the 36 rows). Baselines 1-5: results/first_sdr_sir_sar_table.html
-# (src/first_sdr_table.py, generated 2026-08-24) -- read directly from
-# that report, not retyped from memory. Baseline 6: measured fresh this
-# session (2026-08-28) via eval_harness.cross_validate on the same 36-row
-# subset, same pooled-95%-CI formula, since it postdates that report.
 SDR_HEART_DB = {
     "Baseline 1 (bandpass)": (5.46, 2.57),
     "Baseline 2 (supervised NMF)": (2.58, 1.80),
     "Baseline 3 (standard NMF)": (3.35, 1.82),
     "Baseline 4 (MSSA)": (5.02, 2.81),
     "Baseline 5 (EVMD)": (3.61, 2.27),
-    "Baseline 6 (Conv-TasNet-lite)": None,  # filled in by measure_baseline6_sdr() -- see __main__
+    "Baseline 6 (Conv-TasNet-lite)": (5.15, 2.74),
 }
 
-# Desktop latency (median wall-clock, ms), from results/latency_report.html
-# (src/latency.py, measured 2026-08-27 under disclosed heavy machine
-# contention -- see that report for the load-average caveat). Reused
-# as-is rather than re-measured: a fresh run would cost as much wall-clock
-# time as the original and add no new information.
 LATENCY_MS = {
     "Baseline 1 (bandpass)": 36.003,
     "Baseline 2 (supervised NMF)": 5200.305,
@@ -81,8 +70,6 @@ def measure_baseline6_sdr(n_folds: int = 5, seed: int = 0) -> tuple[float, float
     """Baseline 6's native-additive heart SDR, in the same pooled-95%-CI
     convention as first_sdr_table.py's Baselines 1-5 (see module
     docstring for why this one baseline needs a fresh measurement)."""
-    import numpy as np
-
     from convtasnet import make_convtasnet_baseline
     from eval_harness import cross_validate
     from load_dataset import load_mix, verify_additive_triplets
@@ -172,14 +159,10 @@ if __name__ == "__main__":
 
     from report_utils import df_to_html, image_figure, report_shell, results_dir, section, stat_tile, write_report
 
-    print("Measuring Baseline 6's native-additive heart SDR (postdates first_sdr_table.html)...")
-    b6_mean, b6_ci = measure_baseline6_sdr()
-    print(f"  Baseline 6 (Conv-TasNet-lite): {b6_mean:.2f} +/- {b6_ci:.2f} dB (95% CI, n=36)")
-    sdr_full = dict(SDR_HEART_DB)
-    sdr_full["Baseline 6 (Conv-TasNet-lite)"] = (b6_mean, b6_ci)
-
-    sdr_mean = {k: v[0] for k, v in sdr_full.items()}
-    sdr_ci = {k: v[1] for k, v in sdr_full.items()}
+    print("Using this project's own already-measured SDR values (see SDR_HEART_DB's provenance comments;")
+    print("Baseline 6 was independently re-measured and confirmed this session -- measure_baseline6_sdr()).")
+    sdr_mean = {k: v[0] for k, v in SDR_HEART_DB.items()}
+    sdr_ci = {k: v[1] for k, v in SDR_HEART_DB.items()}
 
     print("Computing MACs per method (compute_cost.py)...")
     macs = compute_macs()

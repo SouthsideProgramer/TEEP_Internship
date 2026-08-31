@@ -59,10 +59,6 @@ TARGET_SDR_GRID_DB = (25.0, 20.0, 15.0, 10.0, 5.0, 0.0, -5.0)
 N_FOLDS = 5
 SWEEP_SEED = 0
 
-# Kept as plain strings (not derived from default_baseline_specs()) so
-# anything that only needs the *labels* -- condition_b.py loading cached
-# .wav files, a report joining on baseline name -- doesn't have to import
-# torch/EVMD just to build this list.
 BASELINE_LABELS = (
     "Baseline 1 (bandpass)",
     "Baseline 2 (supervised NMF)",
@@ -104,7 +100,7 @@ def cache_dir() -> Path:
 
 
 def _safe_label(baseline_label: str) -> str:
-    return baseline_label.split(" (")[0].replace(" ", "")  # "Baseline 1 (bandpass)" -> "Baseline1"
+    return baseline_label.split(" (")[0].replace(" ", "")
 
 
 def estimate_path(root: Path, baseline_label: str, mixed_id: str, source: str) -> Path:
@@ -131,11 +127,6 @@ def _target_grid_rows(
     target_grid value for every source and return the provenance rows."""
     rows = []
     for source in sources:
-        # Batched over the whole target_grid: shares one coarse SDR(alpha)
-        # probe table across all targets for this (row, source) instead of
-        # a from-scratch bisection per target -- see degradation.py's
-        # find_alphas_for_target_sdrs docstring for why (BSS-Eval calls
-        # dominate the cost).
         alphas_by_target = find_alphas_for_target_sdrs(heart_ref, lung_ref, heart_est, lung_est, target_grid, source=source)
         for target in target_grid:
             alpha = alphas_by_target[float(target)]

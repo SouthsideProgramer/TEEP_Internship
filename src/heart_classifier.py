@@ -61,11 +61,10 @@ from load_dataset import load_audio, load_hs
 from split import assign_folds, assign_hs_folds
 
 N_MFCC = 13
-N_FFT = 512  # ~128 ms at this dataset's native 4000 Hz
-HOP_LENGTH = 256  # ~64 ms hop
+N_FFT = 512
+HOP_LENGTH = 256
 RANDOM_SEED = 0
 
-# See this module's docstring for the citation and mapping rationale.
 HEART_TYPE_TO_GROUP = {
     "Normal": "Normal",
     "Mid Systolic Murmur": "Murmur",

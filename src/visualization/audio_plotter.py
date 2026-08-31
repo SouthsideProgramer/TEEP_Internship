@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 import IPython.display as ipd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # src/, for load_dataset + report_utils
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from load_dataset import load_hs, load_ls
 
 
@@ -56,14 +56,12 @@ def plot_audio_waveform(audio_path, ax, title):
         print(f"Error: {audio_path} not found.")
         return
 
-    # Load audio
     y, sr = librosa.load(audio_path)
 
-    # Plot waveform
     librosa.display.waveshow(y, sr=sr, color='black', ax=ax)
     ax.set_title(title)
-    ax.set_ylim([-0.05, 0.05])  # Standardize y-limits
-    ax.set_xlim([0, len(y) / sr])  # Time in seconds
+    ax.set_ylim([-0.05, 0.05])
+    ax.set_xlim([0, len(y) / sr])
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Amplitude')
 
@@ -78,13 +76,11 @@ def plot_combined_waveforms(audio_paths, titles, output_file='combined_plots.png
     """
     num_plots = len(audio_paths)
     
-    # Create subplots
     fig, axs = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots))
     
     for i in range(num_plots):
         plot_audio_waveform(audio_paths[i], axs[i], titles[i])
     
-    # Adjust layout and save figure
     plt.tight_layout()
     plt.savefig(output_file)
     plt.show()
@@ -100,10 +96,8 @@ def play_audio(audio_path):
         print(f"Error: {audio_path} not found.")
         return
 
-    # Load the audio
     y, sr = librosa.load(audio_path)
     
-    # Play the audio
     return ipd.Audio(y, rate=sr)
 
 

@@ -58,7 +58,7 @@ class TestConvTasNetLiteForward:
 
     def test_handles_length_not_a_multiple_of_stride(self):
         model = ConvTasNetLite()
-        x = torch.randn(1, 8003)  # not aligned to the encoder's kernel/stride
+        x = torch.randn(1, 8003)
         y = model(x)
         assert y.shape == (1, 2, 8003)
 
@@ -77,7 +77,6 @@ class TestSISDR:
     def test_scale_invariant(self):
         target = torch.randn(2, 4000)
         scaled = target * 3.7
-        # both should be near the (numerically bounded) ceiling, not just "similar"
         assert (si_sdr(target.clone(), target) > 50).all()
         assert (si_sdr(scaled, target) > 50).all()
 

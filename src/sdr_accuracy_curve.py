@@ -127,10 +127,6 @@ def measure_accuracy_at_each_sdr_point(
         if key in done:
             continue
 
-        # Trust the provenance row's own fold/label (recorded once by
-        # sdr_sweep.build_sdr_sweep()) rather than re-deriving them; assert
-        # they agree with an independent recomputation as a consistency
-        # check, not a silent assumption that the two never drift apart.
         fold = int(row["fold"])
         true = HEART_TYPE_TO_GROUP[row["Heart Sound Type"]]
         recomputed_fold = int(mix_by_id.loc[row["mixed_id"], "fold"])
@@ -225,7 +221,7 @@ if __name__ == "__main__":
 
         isolated_predictions = evaluate_condition_b(baseline_labels=[])
         isolated_accuracy = float(summarize_by_baseline(isolated_predictions).loc[ISOLATED_LABEL, "accuracy"])
-    except Exception as exc:  # pragma: no cover -- best-effort reference line, not load-bearing
+    except Exception as exc:
         print(f"  (could not compute the isolated reference line: {exc})")
 
     plots_dir = results_dir() / "plots"

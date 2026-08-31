@@ -41,7 +41,6 @@ class TestIsParetoDominated:
     def test_three_methods_middle_one_dominated_by_either(self):
         sdr = {"A": 10.0, "B": 5.0, "C": 1.0}
         compute = {"A": 10.0, "B": 20.0, "C": 30.0}
-        # A dominates both B and C (better SDR, better compute than each).
         assert is_pareto_dominated("A", sdr, compute) is False
         assert is_pareto_dominated("B", sdr, compute) is True
         assert is_pareto_dominated("C", sdr, compute) is True

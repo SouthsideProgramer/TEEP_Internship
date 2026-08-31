@@ -64,10 +64,6 @@ if __name__ == "__main__":
     synthetic_df = build_synthetic_set(n_folds=SYNTHETIC_MIX_N_FOLDS, seed=0)
     print(f"  {len(synthetic_df)} synthetic rows")
 
-    # Wrap fit_fn to capture per-fold training diagnostics as a side channel
-    # (train_info is stashed on the returned separate_fn -- see
-    # convtasnet.make_convtasnet_baseline's docstring) without changing
-    # eval_harness/synthetic_mix's fit_and_separate_fn contract.
     train_diagnostics = []
 
     def _instrumented_fit_fn(hs_allowed, ls_allowed):

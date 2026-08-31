@@ -54,47 +54,33 @@ import torch.nn.functional as F
 
 from load_dataset import load_audio
 
-# --- Encoder/decoder ---------------------------------------------------
 
-ENCODER_N = 64        # number of encoder/decoder basis filters
-ENCODER_L = 20         # encoder kernel length, samples (5 ms at 4 kHz)
-ENCODER_STRIDE = ENCODER_L // 2  # 50% overlap, Conv-TasNet Sec. III-B convention
+ENCODER_N = 64
+ENCODER_L = 20
+ENCODER_STRIDE = ENCODER_L // 2
 
-# --- TCN separator (MODEL PARAMETER CHOICES) ----------------------------
-# "Lite" relative to both Conv-TasNet's own speech-separation config
-# (N=512, B=128, H=512, P=3, X=8, R=3, ~5M params) and NeoSSNet's
-# transformer-augmented 8.4M-param model: this project's training pool is
-# ~40-50 recordings/class *per fold* (fewer once a fold's own recordings
-# are excluded, see split.py/synthetic_mix.py's leakage-safe pools), so a
-# multi-million-parameter network would have far more capacity than this
-# baseline's augmented-but-still-small training signal can constrain.
-TCN_B = 64      # bottleneck / residual-path channels
-TCN_H = 128     # depthwise conv-block channels
-TCN_SC = 64     # skip-connection channels
-TCN_P = 3       # depthwise conv kernel size
-TCN_X = 6       # conv blocks per repeat, dilation 2**0 .. 2**(X-1)
-TCN_R = 2       # number of repeats
-# Receptive field: R * sum_{i=0}^{X-1} (P-1)*2**i encoder frames + 1
-#                = 2 * (2*63) + 1 = 253 encoder frames
-#                = 253 * ENCODER_STRIDE / SAMPLE_RATE ~= 1.27s of audio,
-# comfortably covering one heartbeat cycle (~0.6-1s) and a breath phase.
+TCN_B = 64
+TCN_H = 128
+TCN_SC = 64
+TCN_P = 3
+TCN_X = 6
+TCN_R = 2
 
-N_SOURCES = 2  # heart (channel 0), lung (channel 1) -- fixed order, see module docstring
+N_SOURCES = 2
 
-# --- Training loop --------------------------------------------------------
 
-CROP_SECONDS = 4.0      # random-crop length during training (recordings are 15s uniformly, per BACKLOG.md)
+CROP_SECONDS = 4.0
 BATCH_SIZE = 8
 STEPS_PER_EPOCH = 40
 MAX_EPOCHS = 25
 INIT_LR = 1e-3
 WEIGHT_DECAY = 1e-2
-GRAD_CLIP_NORM = 5.0   # matches Conv-TasNet/NeoSSNet's own gradient-clipping choice
-LR_DECAY = 0.5         # matches NeoSSNet's "scaled by 0.5 when val doesn't improve"
-LR_PATIENCE = 4        # epochs of no val improvement before halving LR (NeoSSNet: 4)
-EARLY_STOP_PATIENCE = 10  # epochs of no val improvement before stopping training entirely
-VAL_FRACTION = 0.2     # fraction of the allowed pool's recordings (by file, not by mixture) held out for internal validation
-VAL_PAIRS = 24         # fixed validation batch size (pairs), resampled once per fit, not every epoch
+GRAD_CLIP_NORM = 5.0
+LR_DECAY = 0.5
+LR_PATIENCE = 4
+EARLY_STOP_PATIENCE = 10
+VAL_FRACTION = 0.2
+VAL_PAIRS = 24
 
 
 def _rms(x: np.ndarray) -> float:
@@ -122,7 +108,7 @@ class _TCNBlock(nn.Module):
         self.in_conv = nn.Conv1d(b_channels, h_channels, 1)
         self.prelu1 = nn.PReLU()
         self.norm1 = _global_layer_norm(h_channels)
-        pad = (kernel_size - 1) * dilation // 2  # symmetric "same" padding -- kernel_size is odd, so this is exact
+        pad = (kernel_size - 1) * dilation // 2
         self.depthwise = nn.Conv1d(h_channels, h_channels, kernel_size, padding=pad, dilation=dilation, groups=h_channels)
         self.prelu2 = nn.PReLU()
         self.norm2 = _global_layer_norm(h_channels)
@@ -196,17 +182,14 @@ class ConvTasNetLite(nn.Module):
     def forward(self, mixed: torch.Tensor) -> torch.Tensor:
         """mixed: (batch, T) -> (batch, n_sources, T), channel 0 = heart, 1 = lung."""
         batch, length = mixed.shape
-        w = F.relu(self.encoder(mixed.unsqueeze(1)))  # (batch, N, T')
-        mask_logits = self.separator(w)  # (batch, C*N, T')
+        w = F.relu(self.encoder(mixed.unsqueeze(1)))
+        mask_logits = self.separator(w)
         t_frames = w.shape[-1]
         masks = torch.sigmoid(mask_logits.view(batch, self.n_sources, self.n_filters, t_frames))
-        d = w.unsqueeze(1) * masks  # (batch, C, N, T')
+        d = w.unsqueeze(1) * masks
         d = d.reshape(batch * self.n_sources, self.n_filters, t_frames)
-        est = self.decoder(d).squeeze(1).view(batch, self.n_sources, -1)  # (batch, C, T'')
+        est = self.decoder(d).squeeze(1).view(batch, self.n_sources, -1)
 
-        # The encoder/decoder pair is not an exact inverse for arbitrary T
-        # (Conv-TasNet's own "valid"-convolution encoder), so trim/pad the
-        # reconstruction back to the input length rather than assume they match.
         if est.shape[-1] > length:
             est = est[..., :length]
         elif est.shape[-1] < length:
@@ -340,7 +323,7 @@ def _train_convtasnet(
     gain_range = _native_gain_range()
     snr_range = (min(SNR_SWEEP_DB), max(SNR_SWEEP_DB))
 
-    val_rng = np.random.default_rng(seed + 1)  # fixed validation batch, drawn once (not resampled every epoch)
+    val_rng = np.random.default_rng(seed + 1)
     val_mixed, val_heart, val_lung = _sample_batch(
         val_heart_ids, val_lung_ids, heart_cache, lung_cache, VAL_PAIRS, crop_len, val_rng, gain_range, snr_range
     )

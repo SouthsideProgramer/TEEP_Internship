@@ -15,10 +15,6 @@ import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "HLS_CMDS"
 
-# LS.csv's "Lung Sound ID" column uses different abbreviations for these two
-# types than the filenames actually stored under LS/, e.g. the CSV has
-# "F_C_LUA" but the file on disk is "LS/F_FC_LUA.wav". Correct for it when
-# resolving audio paths.
 LS_TYPE_TO_FILE_ABBREV = {
     "Fine Crackles": "FC",
     "Coarse Crackles": "CC",
@@ -68,8 +64,6 @@ def _validate(df: pd.DataFrame, path_col: str, label: str) -> None:
         raise ValueError(f"{label}: {len(missing)} rows reference missing audio files, e.g. {missing[:5]}")
 
 
-# Table 2 of the HLS-CMDS descriptor paper: published count of each sound
-# type inside its own archive (HS.zip / LS.zip) and inside Mix.zip.
 PAPER_HEART_COUNTS = {
     "Normal": {"abbrev": "NH", "own_zip": 9, "mix_zip": 13},
     "Late Diastolic Murmur": {"abbrev": "LDM", "own_zip": 6, "mix_zip": 13},

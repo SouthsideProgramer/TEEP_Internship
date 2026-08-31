@@ -117,7 +117,6 @@ class TestDictionaryPoolNoLeakage:
 
         assert not set(hs_allowed["Heart Sound ID"]) & excluded_heart
         assert not set(ls_allowed["Lung Sound ID"]) & excluded_lung
-        # every excluded recording should be missing for the reason we expect: it's in this fold
         assert excluded_heart <= {hid for hid, f in heart_fold_map.items() if f == fold}
         assert excluded_lung <= {lid for lid, f in lung_fold_map.items() if f == fold}
 
@@ -136,7 +135,6 @@ class TestSynthesizeRow:
 
         base = row["gain_a"] * (heart_ref + lung_ref)
         noise = mixed - base
-        # at the row's own snr_db, injected noise RMS should match the target within float tolerance
         target_noise_rms = np.sqrt(np.mean(base**2)) / (10 ** (row["snr_db"] / 20.0))
         assert np.isclose(np.sqrt(np.mean(noise**2)), target_noise_rms, rtol=0.2)
 
@@ -165,7 +163,4 @@ class TestValidateAgainstNative:
         assert result["all_reproduce"], [r for r in result["rows"] if not r["reproduces"]]
 
         residuals = [r["synthetic_residual"] for r in result["rows"]]
-        # native additive rows are documented (load_dataset.verify_additive_triplets)
-        # as landing at ~1e-8-1e-4; the synthetic reconstruction should land in the
-        # same regime, not just barely under the 1e-3 pass/fail threshold.
         assert max(residuals) < 1e-2

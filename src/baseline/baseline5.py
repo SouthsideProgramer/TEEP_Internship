@@ -24,21 +24,15 @@ from scipy.signal import butter, sosfiltfilt
 
 from baseline.common import HEART_BAND, LUNG_BAND, _peak_frequency
 
-EVMD_ALPHA = 2000.0             # Sec. II.B: "a balancing parameter alpha = 2000"
-EVMD_K_MIN, EVMD_K_MAX = 2, 10  # Sec. II.B: "begins with K=2 and incrementally increases up to K=10"
-EVMD_MU1 = 0.01                 # Energy Loss Coefficient threshold
-EVMD_MU2 = 0.4                  # Normalised Permutation Entropy threshold
-EVMD_MU3 = 0.3                  # Normalised Permutation Entropy Ratio threshold
-EVMD_MU4 = 0.05                 # Kurtosis Index threshold
-EVMD_HEART_LOWPASS_HZ = 150.0   # Sec. II.B: heart-isolating lowpass cutoff
-EVMD_NPE_EMBED_DIM = 5          # not stated in the paper -- a common default
-                                 # embedding dimension for permutation entropy
-EVMD_MAX_ITER = 100             # this project's own choice, not stated in the
-                                 # paper -- VMD literature commonly converges
-                                 # within 100-200 iterations at tol=1e-6, and
-                                 # the full K=2..10 sweep run over thousands of
-                                 # synthetic mixtures (synthetic_mix.py) makes
-                                 # runtime a real constraint
+EVMD_ALPHA = 2000.0
+EVMD_K_MIN, EVMD_K_MAX = 2, 10
+EVMD_MU1 = 0.01
+EVMD_MU2 = 0.4
+EVMD_MU3 = 0.3
+EVMD_MU4 = 0.05
+EVMD_HEART_LOWPASS_HZ = 150.0
+EVMD_NPE_EMBED_DIM = 5
+EVMD_MAX_ITER = 100
 EVMD_TOL = 1e-6
 
 
@@ -69,10 +63,10 @@ def _vmd(signal: np.ndarray, alpha: float, K: int, max_iter: int = EVMD_MAX_ITER
     f_mirror = np.concatenate([signal[:half][::-1], signal, signal[-half:][::-1]])
     T_ext = len(f_mirror)
 
-    freqs = np.fft.fftfreq(T_ext)  # cycles/sample, in [-0.5, 0.5)
+    freqs = np.fft.fftfreq(T_ext)
     f_hat = np.fft.fft(f_mirror)
 
-    omega = 0.5 * np.arange(K) / K  # uniform init over [0, 0.5) cycles/sample
+    omega = 0.5 * np.arange(K) / K
     u_hat = np.zeros((K, T_ext), dtype=complex)
     lambda_hat = np.zeros(T_ext, dtype=complex)
 
@@ -175,7 +169,7 @@ def _evmd_select_k(signal: np.ndarray, sr: int):
         if _all_modes_pass(modes, npes, max_npe, sr):
             return K, modes, True
 
-    return EVMD_K_MAX, modes, False  # `modes` is already the K=EVMD_K_MAX decomposition from the loop's last pass
+    return EVMD_K_MAX, modes, False
 
 
 def _all_modes_pass(modes: np.ndarray, npes: np.ndarray, max_npe: float, sr: int) -> bool:

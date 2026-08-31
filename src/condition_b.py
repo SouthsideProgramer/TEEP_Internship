@@ -193,10 +193,6 @@ def summarize_by_baseline(predictions_df: pd.DataFrame) -> pd.DataFrame:
             "macro_f1": f1_score(group["true"], group["pred"], average="macro", labels=CLASS_GROUPS, zero_division=0),
             "mean_achieved_sdr": group["achieved_sdr"].mean(),
         })
-    # NO_SEPARATION_LABEL first (the SDR axis's low-end anchor), then Isolated
-    # (the high end), then each separation baseline -- reindex only keeps
-    # rows actually present in predictions_df, so this works whether the
-    # caller passed just one condition or all of them concatenated.
     order = [NO_SEPARATION_LABEL, ISOLATED_LABEL, *BASELINE_LABELS]
     summary = pd.DataFrame(rows).set_index("baseline")
     return summary.reindex([label for label in order if label in summary.index])
@@ -267,7 +263,7 @@ if __name__ == "__main__":
         recall_pct = confusion_recall_pct(counts)
         confusions = top_confusions(counts)
 
-        slug = baseline.split(" (")[0].replace(" ", "")  # "Baseline 1 (bandpass)" -> "Baseline1", "Isolated (...)" -> "Isolated"
+        slug = baseline.split(" (")[0].replace(" ", "")
         png_name = f"condition_b_confusion_{slug}.png"
         plot_confusion_heatmap(counts, recall_pct, plots_dir / png_name, title=f"{baseline}: confusion matrix")
 

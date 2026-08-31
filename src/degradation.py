@@ -66,7 +66,7 @@ import numpy as np
 
 from metrics import SOURCE_LABELS, evaluate_heart_lung
 
-DEFAULT_ALPHAS = tuple(np.linspace(0.0, 1.0, 11))  # 0.0, 0.1, ..., 1.0
+DEFAULT_ALPHAS = tuple(np.linspace(0.0, 1.0, 11))
 
 
 def degrade_toward_ground_truth(ground_truth: np.ndarray, estimate: np.ndarray, alpha: float) -> np.ndarray:
@@ -202,8 +202,6 @@ def find_alphas_for_target_sdrs(
         degrade_row(heart_ref, lung_ref, heart_est, lung_est, a, source, compute_permutation)[source]["sdr"]
         for a in alphas_probe
     ])
-    # sdr_probe is decreasing in alphas_probe (monotonicity, see module docstring);
-    # np.searchsorted/np.interp both want ascending keys, so index by -sdr_probe.
     neg_sdr_probe = -sdr_probe
 
     results = {}
@@ -266,7 +264,7 @@ if __name__ == "__main__":
         sweep_df = pd.DataFrame(sweep).set_index("alpha")
 
         sdrs = sweep_df["sdr"].to_numpy()
-        is_monotonic = bool(np.all(np.diff(sdrs) <= 1e-6))  # tiny numerical tolerance
+        is_monotonic = bool(np.all(np.diff(sdrs) <= 1e-6))
         matches_baseline_sdr = bool(np.isclose(sdrs[-1], evaluate_heart_lung(heart_ref, lung_ref, heart_est, lung_est)["heart"]["sdr"]))
         all_checks.append({"method": label, "monotonic_non_increasing": is_monotonic, "alpha1_matches_measured_sdr": matches_baseline_sdr})
 
@@ -277,7 +275,7 @@ if __name__ == "__main__":
         ))
 
         print(f"Requesting an evenly-spaced target-SDR grid for {label} via find_alpha_for_target_sdr()...")
-        achievable_lo, achievable_hi = sdrs[-1], 30.0  # 30 dB: comfortably below the near-clean alpha=0 value
+        achievable_lo, achievable_hi = sdrs[-1], 30.0
         target_sdrs = np.linspace(achievable_hi, achievable_lo, 6)
         for target in target_sdrs:
             alpha = find_alpha_for_target_sdr(heart_ref, lung_ref, heart_est, lung_est, float(target), source="heart")
