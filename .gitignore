@@ -10,3 +10,9 @@ self_learning.md
 report/
 HLS_CMDS/
 papers/
+# firmware/: PlatformIO build tree, and the golden vectors the native test reads
+# (regenerate with `make firmware-coeffs`). The generated headers under
+# lib/hls_filter/ ARE committed, including hls_clips.h -- the machine that builds
+# the bench firmware then needs neither the dataset nor a Python environment.
+firmware/.pio/
+firmware/golden/

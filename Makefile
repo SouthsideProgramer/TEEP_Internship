@@ -9,13 +9,19 @@ VENV       := .venv
 PYTHON     := $(VENV)/bin/python
 PIP        := $(VENV)/bin/pip
 SRC        := src
+FIRMWARE   := firmware
+PIO        := pio
+CLIPS      := 3
+PORT       :=
 TORCH_INDEX := https://download.pytorch.org/whl/cu121
 
 .PHONY: help all venv install test validate split eval-harness baselines \
         baseline1 baseline2 baseline3 baseline4 baseline5 baseline6 synthetic-set \
         baseline12-synthetic first-sdr-table heart-classifier degradation-scheme sdr-sweep condition-b \
         sdr-accuracy-curve sdr-knee-point compute-cost heart-classifier-cnn latency sdr-compute-plane \
-        stats plots clean clean-pyc clean-all
+        stats plots firmware firmware-coeffs firmware-clips firmware-test \
+        firmware-protocol-test firmware-build firmware-on-device \
+        firmware-causal-check clean clean-pyc clean-all
 
 .DEFAULT_GOAL := help
 
@@ -115,6 +121,25 @@ help:
 	@echo "Reports (all HTML, written to results/ — terminal only prints progress):"
 	@echo "  make stats         per-class/per-location duration, sample rate, clipping stats"
 	@echo "  make plots         waveform/spectrogram/donut-chart figures (headless, MPLBACKEND=Agg)"
+	@echo ""
+	@echo "Firmware ($(FIRMWARE)/, PlatformIO — causal streaming port of Baseline 1 to MCU):"
+	@echo "  make firmware        the whole server-side chain: coeffs + clips + tests + builds"
+	@echo "  make firmware-coeffs design the filters with scipy and regenerate the hardcoded C"
+	@echo "                       coefficients + golden vectors (nothing is designed on the MCU)"
+	@echo "  make firmware-clips  embed HLS-CMDS mixtures into flash for the dataset-replay bench"
+	@echo "                       (CLIPS=3 by default; the board runs these instead of a mic)"
+	@echo "  make firmware-protocol-test  run the board<->host protocol against an emulated board"
+	@echo "                       over a pty — catches framing/layout bugs without hardware"
+	@echo "  make firmware-test   build the native (x86) environment and diff the C filter against"
+	@echo "                       scipy.signal.sosfilt on the golden vectors — no board needed"
+	@echo "  make firmware-build  compile both board targets (nano33ble CMSIS-DSP, esp32s3 ESP-DSP)"
+	@echo "                       plus their *-selftest variants; build-only on this server —"
+	@echo "                       upload with: cd firmware && pio run -e <env> -t upload"
+	@echo "  make firmware-causal-check  measure what the firmware's causal filter costs against"
+	@echo "                       Baseline 1's zero-phase one -> results/firmware_causal_vs_zerophase.html"
+	@echo "  make firmware-on-device PORT=/dev/ttyACM0   NEEDS A BOARD: replay the embedded clips,"
+	@echo "                       diff the output against scipy, score it with BSS Eval and record"
+	@echo "                       real on-device timing -> results/firmware_on_device_report.html"
 	@echo ""
 	@echo "Tests:"
 	@echo "  make test          pytest over src/test/ (all test_*.py: metrics, split, load_dataset,"
@@ -236,9 +261,37 @@ plots:
 	cd $(SRC)/visualization && MPLBACKEND=Agg ../../$(PYTHON) donut_chart.py
 	cd $(SRC)/visualization && MPLBACKEND=Agg ../../$(PYTHON) plot_per_class.py
 
+firmware: firmware-coeffs firmware-clips firmware-test firmware-protocol-test firmware-build
+
+firmware-coeffs:
+	$(PYTHON) $(FIRMWARE)/tools/gen_filter_coeffs.py
+
+firmware-clips:
+	$(PYTHON) $(FIRMWARE)/tools/embed_clips.py --count $(CLIPS)
+
+firmware-protocol-test:
+	$(PYTHON) $(FIRMWARE)/tools/test_protocol.py
+
+firmware-test:
+	cd $(FIRMWARE) && $(PIO) run -e native
+	cd $(FIRMWARE) && ./.pio/build/native/program golden
+
+firmware-build: firmware-clips
+	cd $(FIRMWARE) && $(PIO) run -e nano33ble -e nano33ble-selftest -e nano33ble-bench \
+	                             -e esp32s3 -e esp32s3-selftest -e esp32s3-bench
+
+firmware-on-device:
+	@test -n "$(PORT)" || { echo "usage: make firmware-on-device PORT=/dev/ttyACM0"; exit 1; }
+	$(PYTHON) $(FIRMWARE)/tools/run_on_device.py --port $(PORT)
+
+firmware-causal-check:
+	$(PYTHON) $(FIRMWARE)/tools/causal_vs_zerophase.py
+
 clean:
 	rm -f $(SRC)/dataset_validation.html $(SRC)/mix_pairing_validation.html
 	rm -rf results
+
+	rm -rf $(FIRMWARE)/.pio $(FIRMWARE)/golden
 
 clean-pyc:
 	find . -type d -name __pycache__ -not -path "./$(VENV)/*" -exec rm -rf {} +

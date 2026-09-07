@@ -1,0 +1,6 @@
+{
+  "name": "hls_filter",
+  "version": "0.1.0",
+  "description": "Causal streaming heart/lung bandpass split, shared by the native host test and both board firmwares",
+  "build": { "srcFilter": ["+<*.c>"] }
+}

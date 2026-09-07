@@ -23,8 +23,26 @@ thang/
 │   │   └── plot_per_class.py      # waveform/spectrogram grid, one file per class
 │   └── statistics/           # dataset/audio statistics
 │       └── audio_quality.py       # duration/sample-rate/clipping, per class + location
+├── firmware/            # PlatformIO project: Baseline 1 ported to MCU (Nano 33 BLE Sense, ESP32-S3)
+│   ├── lib/hls_filter/      # board-independent core: biquad cascade + decimator + pipeline
+│   ├── src/                 # one main per target: native test, self-test, dataset-replay bench, mic firmwares
+│   ├── tools/               # scipy filter design -> C headers, clip embedding, on-device scoring, protocol test
+│   ├── pipeline.md          # flow charts: signal path, verification chain, build environments
+│   └── README.md            # the causal-vs-filtfilt decision and what it costs -- read this first
 └── requirements.txt     # pinned deps for the audio_env conda environment
 ```
+
+`firmware/` is a self-contained PlatformIO project (`make firmware` runs the whole
+server-side chain -- design, build, tests -- with no board required). It imports the
+heart/lung bands from `src/baseline/common.py` so the firmware cannot drift from
+Baseline 1, and it filters **causally** rather than with the baseline's zero-phase
+`sosfiltfilt` -- see `firmware/README.md` for why and what that costs.
+
+The measurement firmware has **no microphone**: it replays real HLS-CMDS mixtures
+compiled into flash, so the board filters the same int16 samples the Python baseline
+filters. That makes on-device output diffable against scipy sample by sample and
+scoreable with the same BSS Eval metrics as the rest of `results/` --
+`make firmware-on-device PORT=...` writes `results/firmware_on_device_report.html`.
 
 `src/visualization/*.py` and `src/statistics/audio_quality.py` resolve dataset/example paths relative
 to their own location, so they only work with this exact layout — `src/`, `src/visualization/`,

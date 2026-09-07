@@ -17,6 +17,10 @@ matplotlib==3.11.1
 pytest==9.1.1
 ipython==9.16.1
 
+# Host side of firmware/ -- only firmware/tools/capture_serial.py imports it,
+# to read the board's binary frames off the USB serial port.
+pyserial==3.5
+
 # CUDA-enabled PyTorch (pulls in matching nvidia-*-cu12 runtime libs automatically)
 torch==2.3.1+cu121
 
