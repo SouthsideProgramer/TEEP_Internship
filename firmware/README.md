@@ -248,6 +248,8 @@ and ESP-DSP kernels have not run here — this server has no boards attached. Th
 `*-selftest` environments replay a 1024-sample slice of the same scipy
 reference through the vendor kernels and print the deviation over serial. Run
 this first on each board; expect `max|err|` at the same ~6e-8 / ~2e-8 floor.
+The report repeats every 3 seconds, so a serial monitor opened late still sees
+it — the ESP32-S3 does not wait for the host before printing.
 
 ### Current status
 

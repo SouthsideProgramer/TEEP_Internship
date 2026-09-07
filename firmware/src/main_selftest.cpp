@@ -94,7 +94,16 @@ void setup()
 #else
     delay(200);
 #endif
+}
 
+/*
+ * The whole report is reprinted every few seconds rather than once at boot.
+ * On a board that does not block until the host opens the port (the ESP32-S3),
+ * a serial monitor opened a moment too late would otherwise show nothing at all
+ * and look like a dead board. Re-running the checks costs microseconds.
+ */
+void loop()
+{
     Serial.println("# hls_filter on-board self-test vs scipy.signal.sosfilt");
     Serial.print("# backend: ");
 #if defined(HLS_FILTER_BACKEND_CMSIS)
@@ -115,9 +124,6 @@ void setup()
     ok &= check_block_invariance();
 
     Serial.println(ok ? "ALL CHECKS PASSED" : "CHECKS FAILED");
-}
-
-void loop()
-{
-    delay(1000);
+    Serial.println();
+    delay(3000);
 }
