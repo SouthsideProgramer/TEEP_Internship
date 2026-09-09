@@ -89,17 +89,28 @@ class Target:
 # point -- a method that does not fit even under an optimistic throughput
 # assumption is not a borderline case.
 #
-# CALIBRATION NOTE. The one silicon measurement available when this was
-# written -- Baseline 1 at 62.4 us/sample -- came in ~100x slower than this
-# model predicts, which is far too large a gap to blame on optimism. Chasing
-# it found the cause: the arduino-mbed build was appending -mfloat-abi=soft
-# after its own -mfloat-abi=softfp, GCC takes the last one, and every float
-# operation was compiling to __aeabi_* software-float calls with the
-# Cortex-M4F's FPU unused (0 VFP instructions in the disassembly). Fixed in
-# firmware/platformio.ini via build_unflags. The re-measurement is pending a
-# board, so the timing column here should be read as an upper bound whose
-# calibration against silicon is not yet re-established -- the RAM columns,
-# which decide every infeasible row below, are unaffected either way.
+# CALIBRATION AGAINST SILICON. The first measurement -- Baseline 1 at 62.4
+# us/sample -- came in ~100x slower than this model predicts, a gap far too
+# large to blame on modelling optimism. Chasing it found a real bug rather
+# than a bad model: the arduino-mbed build appends -mfloat-abi=soft after its
+# own -mfloat-abi=softfp, GCC honours the last one, and every float operation
+# was compiling to __aeabi_* software-float calls with the Cortex-M4F's FPU
+# unused (0 VFP instructions in the disassembly). Fixed via build_unflags in
+# firmware/platformio.ini.
+#
+# Re-measured on the same board after the fix: 3.47 us/sample, 72x real time,
+# an 18x speedup. Against this model's 400x prediction for that method, the
+# residual optimism is 5.6x -- which is the right order for real code paying
+# for memory traffic and loop overhead, and is what the timing column below
+# should be discounted by.
+#
+# That factor is a floor on the discount, not a constant: Baseline 1 moves
+# only ~2.4M MACs, so its runtime is overhead-dominated, while a MAC-heavy
+# method should approach peak throughput more closely. Applying 5.6x to
+# Baseline 2 would put it at 0.8x real time rather than 4.4x -- so its
+# margin is genuinely uncertain and is called out as such rather than
+# reported as comfortable. The RAM columns, which decide every infeasible
+# row below, are unaffected by any of this.
 TARGETS = (
     Target(
         name="Nano 33 BLE Sense",

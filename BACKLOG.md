@@ -1505,3 +1505,83 @@ Generated output dirs (`src/visualization/plots/`,
   reference. Last item blocking `report/dataset_audit_comment.tex`.
 - Carried over from the 2026-08-28 session: S6-02 sweep generation, S6-04
   knee-point write-up, S7-06 Architecture 2 tuning.
+
+## Done (2026-09-09, later session)
+
+- **`src/mcu_feasibility.py`** (new) — answers the question the Baseline 1
+  port raised: is there anything better that would also fit? Models peak
+  working RAM, flash for parameters, and compute time for all six baselines
+  against both targets, every figure derived from the method's own imported
+  constants. **The discriminator turns out not to be MACs but whether a
+  method can be written as a stream at all.** Baseline 2 is the only
+  non-trivial one that can (9.1 kB RAM, dictionary in flash); Baselines 4 and
+  5 are batch *by construction* — SSA's diagonal averaging and VMD's ADMM
+  both reference the whole signal every iteration — and overrun RAM by 167x
+  and 71x. Baseline 6 is batch only *as written* (9.2 MB of activations from
+  encoding the whole clip at once; its int8 weights are 318 kB and fit flash
+  fine), so a chunked/causal variant would fit — a model redesign, not a
+  deployment step.
+
+  int8 rescues nothing: /4 leaves B3 at 1.2x over, B6 at 10.7x, B5 at 17.8x,
+  B4 at 41.6x. And for most it is not an applicable representation anyway —
+  EVMD_TOL is 1e-6, four orders below int8's ~4e-3 resolution, so the ADMM
+  could not detect its own convergence; MSSA selects on a 2 % eigenvalue
+  threshold across singular values spanning orders of magnitude; NMF's MU
+  updates carry a 1e-12 epsilon floor.
+
+  **The negative result worth stating**: on the native additive subset the
+  only method beating Baseline 1 on either source is Baseline 4 on lung
+  (+1.34 dB), and Baseline 4 is the least feasible entry. Everything that
+  could run scores worse on both sources. The cheapest method is also the
+  best-performing one here, which is why sdr_compute_plane.py already had it
+  on the Pareto front of both planes.
+
+- **The Cortex-M4F's FPU had never been enabled** — found because
+  mcu_feasibility.py predicted ~400x real time against the measured 4.0x, and
+  a 100x gap was too large to be modelling slack. The arduino-mbed builder
+  appends `-nostdlib -mfloat-abi=soft` after the framework's own `softfp`,
+  GCC honours the last occurrence, and every float operation was compiling to
+  `__aeabi_*` software-float calls: zero VFP instructions in the disassembly
+  of both hls_filter.c.o and CMSIS-DSP's biquad kernel. `build_flags` does not
+  fix it (PlatformIO emits those *before* the trailing group — confirmed by
+  re-reading the compile line rather than assuming the override worked);
+  `build_unflags` does.
+
+  **Re-measured on the same board: 3.47 us/sample, 72x real time — an 18x
+  speedup** from a build flag, not an optimisation. Numerics unchanged and
+  still passing (self-test 6.5e-8 / 1.7e-8, marginally different from the
+  soft-float run because VFP and the soft-float library round intermediates
+  differently; both at the float32 floor, ~150x inside tolerance). Flash also
+  dropped 1 248 B.
+
+  Model now calibrates properly: 400x predicted vs 72x measured = 5.6x
+  optimism, the right order for real code paying for memory traffic. Applied
+  to Baseline 2 that would mean 0.8x real time rather than 4.4x, so its
+  margin is flagged as uncertain rather than reported as comfortable.
+
+- **`report/report.tex`** — Section 10 gained two subsections: *Why the other
+  five baselines do not run here* (the feasibility table, the batch-vs-
+  streaming argument, the int8 analysis, and the negative result) and *A
+  plausible measurement that was wrong by 18x* (the FPU finding, written up
+  for its two transferable lessons: a plausible performance number has not
+  been validated by looking plausible, and numerical verification says
+  nothing about performance verification — the self-test passed correctly
+  both before and after, since software floating point computes the right
+  answer, only slowly). On-device table and timing updated throughout.
+  43 pp., compiles clean.
+
+## Open / next up (updated 2026-09-09)
+
+- **Port Baseline 2** — the one feasible non-trivial method. Value is
+  demonstrating the verification chain generalises to FFT + iterative matrix
+  updates, not improving separation quality (its SDR is worse than B1's).
+  Real-time margin needs measuring, not assuming: see the 5.6x calibration.
+- **ESP32-S3 hardware run** — `esp32s3-selftest` then `esp32s3-bench`; both
+  build clean, ESP-DSP kernel has never executed. Needs the board.
+- **Re-measure the embedded clips' representativeness** — the three embedded
+  rows are not a representative sample on the lung side: M0111 is the
+  0th-percentile lung row of all 36 (−12.43 dB against a 4.09 dB mean). The
+  bench's job is fidelity and timing, not SDR estimation, so this does not
+  invalidate anything, but a reader seeing −12.43 could misread it.
+- Carried over: S6-02 sweep generation, S6-04 knee-point write-up, S7-06
+  Architecture 2 tuning.

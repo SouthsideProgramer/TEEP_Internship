@@ -277,16 +277,25 @@ Three additive mixtures replayed from flash, streamed back, scored on the host:
 
 | clip | max abs err (heart / lung) | × float32 floor | board SDR = scipy SDR (heart / lung) | µs/sample |
 |---|---|---|---|---|
-| M0087 | 9.4e-06 / 6.3e-07 | 1.57 / 1.37 | 4.918 / 3.686 | 62.45 |
-| M0111 | 5.0e-06 / 3.6e-07 | 0.54 / 0.51 | 18.91 / −12.43 | 62.42 |
-| M0112 | 1.0e-05 / 6.9e-07 | 0.94 / 0.85 | 4.556 / 1.197 | 62.43 |
+| M0087 | 1.2e-05 / 4.1e-07 | 2.04 / 0.89 | 4.918 / 3.686 | 3.474 |
+| M0111 | 1.2e-05 / 6.3e-07 | 1.26 / 0.90 | 18.91 / −12.43 | 3.488 |
+| M0112 | 9.1e-06 / 5.8e-07 | 0.82 / 0.71 | 4.556 / 1.197 | 3.431 |
 
 Every SDR agrees with scipy to the last printed digit, which is the point of
 the exercise: the port is faithful, not merely close.
 
-**Timing: 62.4 µs/sample, 4.0x faster than real time.** A 15 s clip filters in
-3.75 s of compute, so a 64 MHz Cortex-M4F has 4x headroom to run this band
-split as a live stream. This replaces `src/latency.py`'s desktop figure for
+**Timing: 3.47 µs/sample, 72x faster than real time.** A 15 s clip filters in
+209 ms of compute, so a 64 MHz Cortex-M4F has ~72x headroom to run this band
+split as a live stream.
+
+That figure is 18x better than the 62.4 µs/sample this same board first
+reported, and the difference was a build flag, not an optimisation: the
+arduino-mbed builder appends `-mfloat-abi=soft` after its own `softfp`, GCC
+takes the last one, and every float operation was compiling to `__aeabi_*`
+software-float calls with the FPU idle — 0 VFP instructions in the
+disassembly of both `hls_filter.c.o` and the CMSIS kernel. `build_unflags`
+removes it. The first number was software floating point on hardware that
+did not need it. This replaces `src/latency.py`'s desktop figure for
 Baseline 1 — that one measured a different machine doing a different amount of
 work.
 
