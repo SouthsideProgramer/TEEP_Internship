@@ -267,8 +267,8 @@ it — the ESP32-S3 does not wait for the host before printing.
 | Streaming state, 4 block sizes | ✅ bit-identical |
 | Wire protocol, both directions | ✅ good stream accepted, corrupted stream rejected |
 | All 7 environments compile | ✅ |
-| CMSIS-DSP numerics, **on a Nano 33 BLE** | ✅ `5.3e-8` heart / `1.5e-8` lung on the golden slice |
-| **On-device SDR and timing, Nano 33 BLE** | ✅ matches scipy, 4.0x real-time — see below |
+| CMSIS-DSP numerics, **on a Nano 33 BLE** | ✅ `6.5e-8` heart / `1.7e-8` lung on the golden slice |
+| **On-device SDR and timing, Nano 33 BLE** | ✅ matches scipy, 72x real-time — see below |
 | ESP-DSP numerics + bench, ESP32-S3 | ⬜ board not yet run |
 
 ### First hardware run (Nano 33 BLE Sense)

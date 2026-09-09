@@ -13,7 +13,7 @@ a PYNQ-ZU or similar embedded target.
 
 EXCEPT for Baseline 1, which no longer needs the extrapolation. It has
 since been ported to an Arduino Nano 33 BLE Sense (64 MHz Cortex-M4F,
-CMSIS-DSP biquads) and measured on silicon: 62.4 us/sample, 4.0x faster
+CMSIS-DSP biquads) and measured on silicon: 3.47 us/sample, 72x faster
 than real time, filtering the same int16 samples this module's desktop
 run filters. See firmware/ and report/report.tex Sec. "Embedded
 Deployment". That figure supersedes this module's bandpass row for any
@@ -218,8 +218,8 @@ if __name__ == "__main__":
             "table -- completes this project's own version of Yaqub et al.'s Table 5 (Params/GFLOPs/"
             "Model size/Inference time). 'Desktop' contrasts with the Edge-Enabled paper's PYNQ-ZU FPGA "
             "target (PROTOCOL.md Sec. 2) -- no claim is made about edge-hardware latency, except for "
-            "Baseline 1, which has since been measured on an Arduino Nano 33 BLE Sense at 62.4 us/sample "
-            "(4.0x real-time). See results/firmware_on_device_report.html; that figure supersedes this "
+            "Baseline 1, which has since been measured on an Arduino Nano 33 BLE Sense at 3.47 us/sample "
+            "(72x real-time). See results/firmware_on_device_report.html; that figure supersedes this "
             "table's bandpass row for deployment questions, though the row stays here so the "
             "cross-method comparison remains one machine throughout."
         ),

@@ -7,8 +7,8 @@ WHY THIS EXISTS. compute_cost.py counts MACs and latency.py measures desktop
 wall-clock, but neither answers the deployment question, because on an MCU the
 binding constraint is usually not arithmetic -- it is memory, and specifically
 whether the algorithm can be expressed as a *stream* at all. Baseline 1 was
-ported to a Nano 33 BLE Sense and measured on silicon (firmware/, 62.4 us per
-sample, 4.0x real time), which raised the obvious follow-up: is there anything
+ported to a Nano 33 BLE Sense and measured on silicon (firmware/, 3.47 us per
+sample, 72x real time), which raised the obvious follow-up: is there anything
 better that would also fit? This module answers it with a resource model
 rather than by attempting six ports and discovering the answer the expensive
 way.
