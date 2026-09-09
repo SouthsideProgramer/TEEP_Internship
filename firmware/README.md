@@ -267,8 +267,36 @@ it — the ESP32-S3 does not wait for the host before printing.
 | Streaming state, 4 block sizes | ✅ bit-identical |
 | Wire protocol, both directions | ✅ good stream accepted, corrupted stream rejected |
 | All 7 environments compile | ✅ |
-| CMSIS-DSP / ESP-DSP numerics | ⬜ needs hardware — run `*-selftest` |
-| On-device SDR and timing | ⬜ needs hardware — run `*-bench` |
+| CMSIS-DSP numerics, **on a Nano 33 BLE** | ✅ `5.3e-8` heart / `1.5e-8` lung on the golden slice |
+| **On-device SDR and timing, Nano 33 BLE** | ✅ matches scipy, 4.0x real-time — see below |
+| ESP-DSP numerics + bench, ESP32-S3 | ⬜ board not yet run |
+
+### First hardware run (Nano 33 BLE Sense)
+
+Three additive mixtures replayed from flash, streamed back, scored on the host:
+
+| clip | max abs err (heart / lung) | × float32 floor | board SDR = scipy SDR (heart / lung) | µs/sample |
+|---|---|---|---|---|
+| M0087 | 9.4e-06 / 6.3e-07 | 1.57 / 1.37 | 4.918 / 3.686 | 62.45 |
+| M0111 | 5.0e-06 / 3.6e-07 | 0.54 / 0.51 | 18.91 / −12.43 | 62.42 |
+| M0112 | 1.0e-05 / 6.9e-07 | 0.94 / 0.85 | 4.556 / 1.197 | 62.43 |
+
+Every SDR agrees with scipy to the last printed digit, which is the point of
+the exercise: the port is faithful, not merely close.
+
+**Timing: 62.4 µs/sample, 4.0x faster than real time.** A 15 s clip filters in
+3.75 s of compute, so a 64 MHz Cortex-M4F has 4x headroom to run this band
+split as a live stream. This replaces `src/latency.py`'s desktop figure for
+Baseline 1 — that one measured a different machine doing a different amount of
+work.
+
+**On reading the deviation columns**: they are scored as a multiple of the
+float32 quantisation floor, measured per clip, not against a fixed absolute
+number. An earlier absolute `1e-5` tolerance passed the quiet clips it was
+calibrated on and then failed these full-scale ones on a kernel that had
+already passed its own self-test — the floor scales with amplitude, and the
+36 additive rows are peak-normalised. Running scipy itself in float32 on
+M0112 deviates by `1.11e-05`, *more* than the board's `1.05e-05`.
 
 Flash / RAM at build time (3 embedded clips = 352 kB):
 

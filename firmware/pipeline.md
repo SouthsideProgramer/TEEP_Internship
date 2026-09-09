@@ -162,8 +162,8 @@ flowchart TB
     scipy --> t5
     t1 --> v1["PASS — error equals the<br/>float32 quantisation floor exactly"]
     t2 --> v2["PASS — good stream accepted,<br/>corrupted stream rejected"]
-    t4 --> v4["not yet run"]
-    t5 --> v5["not yet run"]
+    t4 --> v4["PASS on Nano 33 BLE —<br/>5.3e-8 heart, 1.5e-8 lung"]
+    t5 --> v5["PASS on Nano 33 BLE —<br/>SDR matches scipy, 4.0x real-time"]
 ```
 
 The host result is stronger than "close enough": the measured error **equals**

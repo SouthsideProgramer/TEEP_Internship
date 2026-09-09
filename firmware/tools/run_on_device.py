@@ -55,8 +55,35 @@ FRAME_HEADER = struct.Struct("<4sHHI")
 CLIP_FOOTER = struct.Struct("<4sII")
 DONE = struct.Struct("<4sI")
 
-# Well above the float32 floor (~6e-8), far below any coefficient or sign error.
-TOLERANCE = 1.0e-5
+# The board computes in float32; the scipy reference here is float64. The gap
+# between them is not a constant -- it scales with signal amplitude, clip
+# length and the cascade's Q, because an IIR accumulates rounding through its
+# own state. A fixed absolute tolerance therefore only holds for the amplitude
+# it was calibrated on: 1e-5 was fine for clips peaking near 0.05, and failed
+# the moment additive (peak-normalised, full-scale) clips were embedded, on a
+# kernel that had already passed its on-board self-test.
+#
+# So the floor is measured per clip instead of assumed: run the same filter
+# over the same samples in float32 with scipy itself, and the deviation that
+# produces is what any float32 implementation is entitled to. The board is
+# then held to a small multiple of it. Observed board/floor ratios on real
+# hardware are 0.5-1.6 (the board is as accurate as scipy-in-float32, and
+# sometimes more), while a sign error, a wrong coefficient or a dropped
+# section lands 3+ orders of magnitude higher -- so 4x separates them with
+# room to spare in both directions.
+FLOOR_MARGIN = 4.0
+# Guards a silent or near-silent clip, where the measured floor would be ~0.
+FLOOR_MIN = 1.0e-7
+
+
+def float32_floor(sos, mixed, ref64):
+    """
+    How far a correct float32 implementation lands from the float64 reference,
+    for this exact signal and filter -- measured by running scipy itself in
+    float32 rather than assumed from a constant.
+    """
+    ref32 = sosfilt(sos.astype(np.float32), mixed.astype(np.float32))
+    return max(float(np.max(np.abs(ref32.astype(np.float64) - ref64))), FLOOR_MIN)
 
 
 def read_exact(port, n):
@@ -154,8 +181,15 @@ def score(clips, mix_df):
         heart_ref = sf.read(row["heart_audio_path"], dtype="int16")[0][: clip["n_samples"]] / 32768.0
         lung_ref = sf.read(row["lung_audio_path"], dtype="int16")[0][: clip["n_samples"]] / 32768.0
 
-        py_heart = sosfilt(design_bandpass(*HEART_BAND, sr), mixed)
-        py_lung = sosfilt(design_bandpass(*LUNG_BAND, sr), mixed)
+        heart_sos = design_bandpass(*HEART_BAND, sr)
+        lung_sos = design_bandpass(*LUNG_BAND, sr)
+        py_heart = sosfilt(heart_sos, mixed)
+        py_lung = sosfilt(lung_sos, mixed)
+
+        heart_err = float(np.max(np.abs(clip["heart"] - py_heart)))
+        lung_err = float(np.max(np.abs(clip["lung"] - py_lung)))
+        heart_floor = float32_floor(heart_sos, mixed, py_heart)
+        lung_floor = float32_floor(lung_sos, mixed, py_lung)
 
         board_m = evaluate_heart_lung(heart_ref, lung_ref, clip["heart"], clip["lung"])
         py_m = evaluate_heart_lung(heart_ref, lung_ref, py_heart, py_lung)
@@ -165,8 +199,10 @@ def score(clips, mix_df):
             "clip": clip["clip_id"],
             "heart type": row["Heart Sound Type"],
             "lung type": row["Lung Sound Type"],
-            "max |board - scipy| heart": float(np.max(np.abs(clip["heart"] - py_heart))),
-            "max |board - scipy| lung": float(np.max(np.abs(clip["lung"] - py_lung))),
+            "max |board - scipy| heart": heart_err,
+            "max |board - scipy| lung": lung_err,
+            "err / f32 floor heart": heart_err / heart_floor,
+            "err / f32 floor lung": lung_err / lung_floor,
             "board heart SDR": board_m["heart"]["sdr"],
             "scipy heart SDR": py_m["heart"]["sdr"],
             "board lung SDR": board_m["lung"]["sdr"],
@@ -180,17 +216,20 @@ def score(clips, mix_df):
 
 def build_report(df, port_name, out_path=None):
     worst = max(df["max |board - scipy| heart"].max(), df["max |board - scipy| lung"].max())
-    ok = worst <= TOLERANCE
+    worst_ratio = max(df["err / f32 floor heart"].max(), df["err / f32 floor lung"].max())
+    ok = worst_ratio <= FLOOR_MARGIN
     rtf = df["real-time factor"].min()
 
     tiles = "\n".join([
-        stat_tile("Board vs scipy", f"{worst:.2e}", f"max abs, tolerance {TOLERANCE:.0e}", ok=ok),
+        stat_tile("Board vs scipy", f"{worst_ratio:.2f}x",
+                  f"of the float32 floor (max abs {worst:.1e}), limit {FLOOR_MARGIN:.0f}x", ok=ok),
         stat_tile("Slowest real-time factor", f"{rtf:.0f}x", "compute only, no I/O", ok=rtf > 1.0),
         stat_tile("Cost per sample", f"{df['us/sample'].max():.2f} us", "worst clip"),
         stat_tile("Clips", f"{len(df)}", "replayed from flash"),
     ])
 
     accuracy = df[["max |board - scipy| heart", "max |board - scipy| lung",
+                   "err / f32 floor heart", "err / f32 floor lung",
                    "board heart SDR", "scipy heart SDR", "board lung SDR", "scipy lung SDR"]]
     timing = df[["compute ms", "us/sample", "real-time factor"]]
 
@@ -201,8 +240,12 @@ def build_report(df, port_name, out_path=None):
                 + "<p>The board filtered the same int16 samples the Python baseline filters, so these "
                   "two SDR columns should agree to the last printed digit. They are not independent "
                   "measurements of the same thing &mdash; they are a check that the port is faithful. "
-                  "The deviation columns are the real test: anything above the float32 quantisation "
-                  f"floor (~6e-8) means the vendor DSP kernel is not computing what scipy computes.</p>"),
+                  "The deviation columns are the real test, read as a multiple of the float32 "
+                  "quantisation floor rather than in absolute terms: the floor is measured per clip "
+                  "by running the same filter through scipy in float32, because it scales with "
+                  "amplitude and clip length. A ratio near 1 means the board is as accurate as "
+                  f"scipy-in-float32; above {FLOOR_MARGIN:.0f}x means the vendor DSP kernel is not "
+                  "computing what scipy computes.</p>"),
         section("On-device timing", "measured on the board, filtering only",
                 df_to_html(timing, index_label="clip", float_fmt="{:.3f}")
                 + "<p>Timed around the int16 scaling and both band cascades, with serial I/O excluded. "
@@ -265,8 +308,8 @@ def main():
     out, ok = build_report(df, source_name, args.out)
     print(f"\nwrote {out}")
     if not ok:
-        print(f"FAIL: board output deviates from scipy by more than {TOLERANCE:.0e} -- "
-              "the vendor DSP kernel is not computing what scipy computes")
+        print(f"FAIL: board output deviates from scipy by more than {FLOOR_MARGIN:.0f}x the float32 "
+              "quantisation floor -- the vendor DSP kernel is not computing what scipy computes")
         return 1
     print("PASS: board output matches scipy within the float32 quantisation floor")
     return 0
