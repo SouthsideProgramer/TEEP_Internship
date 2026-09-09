@@ -373,6 +373,22 @@ pio run -e nano33ble -t upload
 python tools/capture_serial.py --port /dev/ttyACM0 --seconds 15   # -> results/*.wav
 ```
 
+### ESP32-S3: use the UART port, not the USB port
+
+The DevKitC-1 exposes two USB-C sockets and they are not interchangeable for
+this firmware. Use the one silkscreened **`UART`** (CP2102N bridge, enumerates
+as `/dev/ttyUSB*`). The one marked `USB` is the ESP32-S3's own USB-OTG
+peripheral, and `Serial` only reaches it when the sketch is built with
+`-DARDUINO_USB_CDC_ON_BOOT=1`, which these environments deliberately do not
+set: the flag would redirect `Serial` away from the UART bridge, so the two
+ports are mutually exclusive rather than additive. Flashing over the `USB`
+port succeeds either way, which is what makes this worth stating — the
+failure shows up afterwards as a silent monitor, indistinguishable at a
+glance from a dead board or a failing self-test.
+
+If the board does not reset into download mode on its own, hold `BOOT`, tap
+`RESET`, release `BOOT`, then upload.
+
 ### ESP32-S3 wiring
 
 `src/main_esp32s3.cpp` assumes a 24-bit I2S MEMS mic (INMP441 / ICS-43434
