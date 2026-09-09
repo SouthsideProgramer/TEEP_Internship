@@ -1409,3 +1409,99 @@ Generated output dirs (`src/visualization/plots/`,
   `report/report.tex` §10.3 updated with the completed table and finding
   (previously stated as pending); 6 logic tests (`test_sdr_compute_plane.py`)
   already passing from before this completion.
+
+## Done (2026-09-09 session)
+
+- **`firmware/` — Baseline 1 ported to a microcontroller and measured on
+  silicon** (not a Notion ref; the charter scopes C1/C2 only, and embedded
+  deployment was never a chartered contribution — this is a deliberate
+  extension, flagged as such rather than folded in as if it had been
+  planned). Five commits: the port itself, two serial-usability fixes, the
+  additive-clip fix and the tolerance fix below.
+
+  **Target**: Arduino Nano 33 BLE Sense (nRF52840, 64 MHz Cortex-M4F, 256 kB
+  RAM), CMSIS-DSP biquads. An ESP32-S3 target builds from the same core
+  (ESP-DSP backend) but has not been run on hardware yet. Baseline 1 is the
+  right first candidate not merely for being simplest — `sdr_compute_plane.py`
+  puts it on the Pareto front of *both* compute planes, so it is one of the
+  two methods a deployment decision would actually consider.
+
+  **The one intentional divergence**: causal single-pass `sosfilt` instead of
+  the Python baseline's zero-phase `sosfiltfilt`. Forced, not preferred — a
+  15 s int16 clip is 120 kB (46 % of total RAM) and `filtfilt` needs a
+  240 kB float32 working copy on top, on a 256 kB part. Measured cost over
+  all 145 Mix.csv rows (`causal_vs_zerophase.py`, same coefficients, same BSS
+  Eval, only the filter direction changed): SDR unchanged within ±0.2 dB,
+  SIR −0.13/−0.50 dB. SAR *appears* to improve by 5–7 dB, which is a metric
+  artifact and is documented as one: `mir_eval`'s projection fits a causal
+  512-tap distortion filter, so a causal IIR's phase response is absorbed as
+  allowed distortion while a zero-phase filter's acausal response is not.
+
+  **Verification chain, four stages** — three need no hardware: portable C vs
+  scipy on golden vectors (plus block sizes 1/7/64/333 bit-identical, which
+  is what proves streaming state is carried); wire protocol against an
+  emulated board over a pty; then on silicon, `*-selftest` (vendor kernel vs
+  a 1024-sample flash-resident reference) before `*-bench` (full clips). The
+  ordering is load-bearing: a wrong vendor kernel makes every bench number
+  wrong in a way that reads as a filter-design problem.
+
+  **The bench firmware has no microphone by design** — it replays real
+  HLS-CMDS mixtures compiled into flash, bit-identical to what the Python
+  baseline filters (the 1/32768 scaling reproduces `librosa.load()` exactly,
+  verified), so board output is diffable against scipy sample by sample.
+
+  **Real results, first hardware run**: selftest `5.3e-8` heart / `1.5e-8`
+  lung on the golden slice. Bench on three additive mixtures — every SDR
+  agrees with scipy to the last printed digit across all six clip/source
+  measurements; **62.4 us/sample, 4.0x faster than real time**. That is the
+  deployment-relevant number: this band split runs as a live stream on a
+  64 MHz part with 4x headroom, and nothing in its RAM footprint scales with
+  recording length.
+
+- **`embed_clips.py` was embedding non-additive clips** (found while reading
+  the first hardware run's output, not by a test). It selected with
+  `mix_df.head(count)` → M0001–M0003, none of which is additive (§5.1's
+  36-row finding), so `run_on_device.py`'s SDR column was measuring the
+  dataset's 109-row defect rather than the separator. Selection now draws
+  from the additive subset, computed from `verify_additive_triplets()` rather
+  than hardcoded so it tracks the dataset; a non-additive `--ids` is refused
+  unless `--any` is passed, and the generated header records which mode
+  produced it. Board-vs-scipy was unaffected throughout — it is a numerical
+  diff, not a separation metric.
+
+- **The accuracy criterion was calibrated on the wrong amplitude regime.**
+  The first run on additive clips reported FAIL at `1.045e-05` against an
+  absolute `1e-5` tolerance — on a board whose self-test had just passed at
+  `5.3e-8` and whose SDR matched scipy to four significant figures. The
+  tolerance was wrong, not the kernel: the board computes in float32 against
+  a float64 reference, and an IIR accumulates rounding through its own state,
+  so the gap scales with amplitude. `1e-5` had been calibrated on clips
+  peaking near 0.05; the 36 additive rows are peak-normalised to full scale
+  (that normalisation *is* the clipping fingerprint identifying them), ~20x
+  louder. Decisive check: scipy itself in float32 on M0112 deviates by
+  `1.114e-05`, **more** than the board's `1.045e-05`.
+
+  Fixed by measuring the floor per clip instead of assuming it — filter the
+  same samples with scipy in float32, hold the board to 4x that. Observed
+  ratios on hardware: 0.51–1.57. Injected faults for calibration: 0.01 % gain
+  error → 14.3, one dropped sample → 15 691, sign inversion → 296 503. The
+  threshold sits in the gap with ~9x margin above the real board.
+
+- **`report/report.tex`**: new §11 "Embedded Deployment: Baseline 1 on a
+  Microcontroller" (causal-filtering decision + measured cost, the
+  four-stage verification chain, on-silicon results, and the tolerance
+  finding written up as a general trap). §10.2 gained an explicit scope
+  paragraph — its desktop figures are a one-machine cross-method ranking,
+  not an embedded-cost claim, and are superseded for Baseline 1 alone.
+  `src/latency.py`'s docstring and report dek carried a "no claim is made
+  about edge-hardware latency" line that had become false for that method;
+  both now state the exception and point at the on-device figure.
+
+## Open / next up (as of 2026-09-09)
+
+- **ESP32-S3 hardware run** — `esp32s3-selftest` then `esp32s3-bench`; both
+  build clean but the ESP-DSP kernel has never executed. Needs the board.
+- **S1-14**: confirm the descriptor's own stated sample rate with a page
+  reference. Last item blocking `report/dataset_audit_comment.tex`.
+- Carried over from the 2026-08-28 session: S6-02 sweep generation, S6-04
+  knee-point write-up, S7-06 Architecture 2 tuning.

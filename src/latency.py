@@ -11,6 +11,17 @@ latency on the workstation this project actually runs on, not edge
 hardware -- no claim is made about how these numbers would translate to
 a PYNQ-ZU or similar embedded target.
 
+EXCEPT for Baseline 1, which no longer needs the extrapolation. It has
+since been ported to an Arduino Nano 33 BLE Sense (64 MHz Cortex-M4F,
+CMSIS-DSP biquads) and measured on silicon: 62.4 us/sample, 4.0x faster
+than real time, filtering the same int16 samples this module's desktop
+run filters. See firmware/ and report/report.tex Sec. "Embedded
+Deployment". That figure supersedes this module's bandpass row for any
+deployment question; the row is kept because this module's purpose is a
+uniform cross-method comparison on one machine, which a number from a
+different machine would break. The other six methods have no embedded
+measurement, so for them the caveat above stands unchanged.
+
 Uniform protocol, held identical across every method regardless of what
 else is running on the machine: the same real 60,000-sample (15s @
 4000 Hz) input, one untimed warm-up call, N_TRIALS timed repetitions,
@@ -206,7 +217,11 @@ if __name__ == "__main__":
             "The empirical wall-clock/CPU-time counterpart to compute_cost.py's analytic MACs/params "
             "table -- completes this project's own version of Yaqub et al.'s Table 5 (Params/GFLOPs/"
             "Model size/Inference time). 'Desktop' contrasts with the Edge-Enabled paper's PYNQ-ZU FPGA "
-            "target (PROTOCOL.md Sec. 2) -- no claim is made about edge-hardware latency."
+            "target (PROTOCOL.md Sec. 2) -- no claim is made about edge-hardware latency, except for "
+            "Baseline 1, which has since been measured on an Arduino Nano 33 BLE Sense at 62.4 us/sample "
+            "(4.0x real-time). See results/firmware_on_device_report.html; that figure supersedes this "
+            "table's bandpass row for deployment questions, though the row stays here so the "
+            "cross-method comparison remains one machine throughout."
         ),
         stat_tiles=stat_tiles,
         body=load_note + "\n\n" + body,
