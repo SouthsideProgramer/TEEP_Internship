@@ -284,6 +284,9 @@ firmware-on-device:
 	@test -n "$(PORT)" || { echo "usage: make firmware-on-device PORT=/dev/ttyACM0"; exit 1; }
 	$(PYTHON) $(FIRMWARE)/tools/run_on_device.py --port $(PORT)
 
+energy-model:
+	cd $(SRC) && ../$(PYTHON) energy_model.py
+
 plot-server-vs-board:
 	cd $(SRC) && MPLBACKEND=Agg ../$(PYTHON) plot_server_vs_board.py
 
