@@ -11,15 +11,32 @@ isolated heart/lung references stay on the host, where tools/run_on_device.py
 uses them to score the board's output with the same BSS Eval metrics as the
 rest of the project.
 
+ADDITIVE-ONLY BY DEFAULT. Only 36 of Mix.csv's 145 rows have a mixture that is
+actually a*(heart+lung) of its named sources (load_dataset.verify_additive_
+triplets; see the dataset audit in report/). On the other 109 the listed
+heart/lung files do not describe the mixed signal at all, so an SDR scored
+against them measures nothing about separation quality. The board-vs-scipy
+comparison is unaffected either way -- it is a numerical diff, not a
+separation metric -- but the earlier default of `mix_df.head(count)` embedded
+M0001-M0003, all three of them non-additive, which made run_on_device.py's SDR
+column unquotable. Selection is now drawn from the additive subset so every
+number the bench prints means something. `--any` restores the old behaviour
+for a deliberate board-vs-scipy-only run.
+
+The valid-ID list is computed from verify_additive_triplets() rather than
+hardcoded, so it follows the dataset instead of drifting from it. That costs a
+pass over all 145 mixtures (~30 s) each time this runs.
+
 Flash cost is 2 bytes per sample: a 15 s clip at 4000 Hz is 120 kB, so the
 default of 3 clips uses 360 kB. The Nano 33 BLE Sense has ~890 kB free after
 the firmware, which is the binding constraint -- the ESP32-S3 has room for far
 more.
 
 Usage:
-    python firmware/tools/embed_clips.py                     # first 3 Mix.csv rows
+    python firmware/tools/embed_clips.py                     # first 3 additive rows
     python firmware/tools/embed_clips.py --count 5
-    python firmware/tools/embed_clips.py --ids M0001 M0042 M0100
+    python firmware/tools/embed_clips.py --ids M0111 M0112
+    python firmware/tools/embed_clips.py --any --count 3     # ignore additivity
 """
 import argparse
 import sys
@@ -32,7 +49,7 @@ FIRMWARE_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = FIRMWARE_DIR.parent
 sys.path.insert(0, str(REPO_DIR / "src"))
 
-from load_dataset import load_mix  # noqa: E402  (needs sys.path above)
+from load_dataset import load_mix, verify_additive_triplets  # noqa: E402  (needs sys.path above)
 
 OUT_HEADER = FIRMWARE_DIR / "lib" / "hls_filter" / "hls_clips.h"
 BASELINE_SR = 4000
@@ -44,22 +61,44 @@ NANO33_FLASH_BYTES = 983_040
 NANO33_FIRMWARE_BYTES = 92_000  # the -bench build, rounded up
 
 
-def select_rows(mix_df, count, ids):
+def additive_ids(mix_df):
+    """Mixed Sound IDs whose mixture really is a*(heart+lung) of its named sources."""
+    result = verify_additive_triplets(mix_df)
+    return {row["mixed_id"] for row in result["rows"] if row["additive"]}
+
+
+def select_rows(mix_df, count, ids, allow_non_additive):
+    valid = None if allow_non_additive else additive_ids(mix_df)
+
     if ids:
         missing = [i for i in ids if i not in set(mix_df["Mixed Sound ID"])]
         if missing:
             sys.exit(f"unknown Mixed Sound ID(s): {', '.join(missing)}")
+        if valid is not None:
+            non_additive = [i for i in ids if i not in valid]
+            if non_additive:
+                sys.exit(f"not additive, so any SDR scored on them is meaningless: "
+                         f"{', '.join(non_additive)}. Pass --any if that is intended.")
         return mix_df[mix_df["Mixed Sound ID"].isin(ids)].set_index("Mixed Sound ID").loc[ids].reset_index()
-    return mix_df.head(count)
+
+    if valid is None:
+        return mix_df.head(count)
+
+    rows = mix_df[mix_df["Mixed Sound ID"].isin(valid)]
+    if len(rows) < count:
+        sys.exit(f"only {len(rows)} additive row(s) available, asked for {count}")
+    return rows.head(count)
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--count", type=int, default=3, help="how many Mix.csv rows to embed (default: 3)")
     p.add_argument("--ids", nargs="+", default=None, help="explicit Mixed Sound IDs, overrides --count")
+    p.add_argument("--any", dest="allow_non_additive", action="store_true",
+                   help="allow non-additive rows (board-vs-scipy only; their SDR means nothing)")
     args = p.parse_args()
 
-    rows = select_rows(load_mix(), args.count, args.ids)
+    rows = select_rows(load_mix(), args.count, args.ids, args.allow_non_additive)
 
     clips = []
     for _, row in rows.iterrows():
@@ -79,6 +118,9 @@ def main():
  *
  * Generated : {date.today().isoformat()}
  * Clips     : {len(clips)} HLS-CMDS mixture(s), {total_bytes} B of flash
+ * Additive  : {"yes -- SDR scored on these is meaningful"
+                if not args.allow_non_additive else
+                "NO (--any) -- board-vs-scipy is still valid, SDR is NOT"}
  *
  * Raw int16 PCM exactly as stored in the .wav files. The firmware scales by
  * 1/32768 to reach the [-1, 1) range, which reproduces librosa.load()'s output

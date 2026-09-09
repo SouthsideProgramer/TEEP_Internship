@@ -16,3 +16,6 @@ papers/
 # the bench firmware then needs neither the dataset nor a Python environment.
 firmware/.pio/
 firmware/golden/
+# Raw serial dumps from tools/capture_raw.py -- a run artifact, ~1.4 MB per
+# 3-clip capture, scored into results/ and then of no further use.
+capture*.bin

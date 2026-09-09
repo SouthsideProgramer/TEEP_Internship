@@ -106,6 +106,14 @@ diff vs scipy + BSS Eval vs the dataset's isolated H####/L#### references
   → results/firmware_on_device_report.html
 ```
 
+**Only additive rows are embedded.** 109 of `Mix.csv`'s 145 mixtures are not
+`a·(heart+lung)` of their named sources at all (Section *Mixture Validity* of
+the main report), so an SDR scored against those references measures nothing.
+`embed_clips.py` draws from the 36 valid rows and refuses a non-additive
+`--ids` unless `--any` is passed; the generated `hls_clips.h` records which
+mode produced it. The board-vs-scipy diff is a numerical comparison and stays
+valid either way — it is the SDR column that additivity governs.
+
 **No decimation here** — the dataset is already at 4000 Hz. Only the two
 bandpass cascades run, which is exactly what Baseline 1 does.
 
