@@ -1585,3 +1585,33 @@ Generated output dirs (`src/visualization/plots/`,
   invalidate anything, but a reader seeing −12.43 could misread it.
 - Carried over: S6-02 sweep generation, S6-04 knee-point write-up, S7-06
   Architecture 2 tuning.
+
+- **`src/server_vs_board.py`** (new) — a like-for-like throughput comparison
+  for the paper. Not a division of two existing numbers: `latency.py` times
+  `sosfiltfilt` (two passes per band) while the firmware makes one causal
+  pass, so this re-times the workstation on *exactly* the board's workload.
+  The zero-phase version measures 2.0x the causal one, the factor the
+  structure predicts, which is a check that the re-timing measures what it
+  claims. Server rows taken at load average 0.1 — clean single-tenant, unlike
+  `latency.py`'s 74.6.
+
+  | platform | ms/clip | us/sample | cycles/sample | x real-time |
+  |---|---|---|---|---|
+  | i9-9900K @ 3.6 GHz | 2.15 | 0.036 | 129 | 6 965 |
+  | Cortex-M4F @ 64 MHz | 208.5 | 3.474 | 222 | 72 |
+  | same, pre-FPU-fix | 3 747 | 62.45 | 3 997 | 4.0 |
+
+  **The finding: almost all of the gap is clock rate.** 97x slower per sample
+  against a 56x clock disadvantage means 1.72x per clock cycle — a far
+  smaller architectural penalty than the raw ratio suggests, and structural
+  rather than lucky: a biquad cascade is serial (each output depends on the
+  previous two), so the i9's issue width, out-of-order execution and cache
+  hierarchy have almost nothing to exploit.
+
+  Kept the pre-fix row deliberately: at 3 997 cycles/sample it would have
+  supported the conclusion "microcontrollers are ~30x less efficient per cycle
+  than desktops, which is what embedded DSP costs" — reasonable-sounding,
+  quotable, wrong, and hard to dislodge once published.
+
+  `report.tex` Sec. 10.4 written up for the paper; `Makefile` gains
+  `server-vs-board` and `mcu-feasibility` targets.

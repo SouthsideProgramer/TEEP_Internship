@@ -284,6 +284,12 @@ firmware-on-device:
 	@test -n "$(PORT)" || { echo "usage: make firmware-on-device PORT=/dev/ttyACM0"; exit 1; }
 	$(PYTHON) $(FIRMWARE)/tools/run_on_device.py --port $(PORT)
 
+server-vs-board:
+	cd $(SRC) && ../$(PYTHON) server_vs_board.py
+
+mcu-feasibility:
+	cd $(SRC) && ../$(PYTHON) mcu_feasibility.py
+
 firmware-causal-check:
 	$(PYTHON) $(FIRMWARE)/tools/causal_vs_zerophase.py
 
