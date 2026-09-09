@@ -85,11 +85,20 @@ def _sos(low: float, high: float, sr: int):
     return butter(FILTER_ORDER, [low / nyq, high / nyq], btype="bandpass", output="sos")
 
 
-def _causal_band_split(mixed: np.ndarray, sr: int):
-    """Exactly the firmware's arithmetic: one causal pass per band, no filtfilt."""
-    heart = sosfilt(_sos(*HEART_BAND, sr), mixed)
-    lung = sosfilt(_sos(*LUNG_BAND, sr), mixed)
-    return heart, lung
+def _causal_band_split(mixed: np.ndarray, heart_sos, lung_sos):
+    """
+    Exactly the firmware's arithmetic: one causal pass per band, no filtfilt.
+
+    Coefficients are passed in, not designed here. The firmware's timed region
+    covers filtering only -- its SOS coefficients are compile-time constants
+    in flash, designed on the server by gen_filter_coeffs.py. An earlier
+    version of this function called butter() inside the timed call and so
+    charged the server for filter design the board never performs, making it
+    look 2.8x slower than it is. Same class of mistake as the FPU one in
+    Sec. "A plausible measurement that was wrong by 18x": the number was
+    stable and plausible, and measuring the wrong thing.
+    """
+    return sosfilt(heart_sos, mixed), sosfilt(lung_sos, mixed)
 
 
 def _zero_phase_band_split(mixed: np.ndarray, sr: int):
@@ -103,10 +112,16 @@ def measure(n_trials: int = 7) -> dict:
     mix = load_mix()
     row = mix.iloc[0]
     mixed, sr = sf.read(row["mixed_audio_path"], dtype="int16")
-    mixed = mixed.astype(np.float64) / 32768.0
+    # float32 throughout, matching the board exactly. Measured both ways: the
+    # server is within 3 % either side, so precision is not a confound here --
+    # but matching it removes the question rather than answering it later.
+    mixed = mixed.astype(np.float32) / np.float32(32768.0)
     n = len(mixed)
 
-    causal = time_calls(lambda: _causal_band_split(mixed, sr), n_trials=n_trials)
+    heart_sos = _sos(*HEART_BAND, sr).astype(np.float32)
+    lung_sos = _sos(*LUNG_BAND, sr).astype(np.float32)
+    causal = time_calls(lambda: _causal_band_split(mixed, heart_sos, lung_sos),
+                        n_trials=n_trials)
     zero_phase = time_calls(lambda: _zero_phase_band_split(mixed, sr), n_trials=n_trials)
 
     load1 = os.getloadavg()[0]
