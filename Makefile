@@ -21,7 +21,7 @@ TORCH_INDEX := https://download.pytorch.org/whl/cu121
         sdr-accuracy-curve sdr-knee-point compute-cost heart-classifier-cnn latency sdr-compute-plane \
         stats plots firmware firmware-coeffs firmware-clips firmware-test \
         firmware-protocol-test firmware-build firmware-on-device \
-        firmware-causal-check clean clean-pyc clean-all
+        firmware-causal-check oracle-mask-ceiling clean clean-pyc clean-all
 
 .DEFAULT_GOAL := help
 
@@ -102,6 +102,11 @@ help:
 	@echo "                              heart_classifier.py's own report -> results/"
 	@echo "                              heart_classifier_cnn_report.html. sdr-knee-point (above) runs"
 	@echo "                              both architectures and compares their knee points."
+	@echo ""
+	@echo "Oracle-mask ceiling (src/oracle_mask_ceiling.py) -> results/oracle_mask_ceiling_report.html:"
+	@echo "  make oracle-mask-ceiling   IRM / Wiener / binary oracle masks from the true sources on"
+	@echo "                             Baseline 2's STFT grid, over the 36 valid rows, next to"
+	@echo "                             Baseline 0 and 1 -- the ceiling for mask-based separation."
 	@echo ""
 	@echo "Desktop latency (src/latency.py, uniform protocol) -> results/latency_report.html:"
 	@echo "  make latency   wall-clock + CPU-time inference latency per method (warm-up + timed"
@@ -251,6 +256,9 @@ compute-cost:
 
 heart-classifier-cnn:
 	cd $(SRC) && ../$(PYTHON) heart_classifier_cnn.py
+
+oracle-mask-ceiling:
+	cd $(SRC) && ../$(PYTHON) oracle_mask_ceiling.py
 
 stats:
 	cd $(SRC)/statistics && ../../$(PYTHON) audio_quality.py

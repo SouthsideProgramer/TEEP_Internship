@@ -1570,6 +1570,84 @@ Generated output dirs (`src/visualization/plots/`,
   answer, only slowly). On-device table and timing updated throughout.
   43 pp., compiles clean.
 
+## Done (2026-09-13 session)
+
+- **The four "still open" report items re-checked against the repo; two
+  were stale.** The SDR sweep had in fact finished for all six baselines
+  on 2026-08-28 (`results/sdr_sweep_provenance.csv`, 3024 rows, 36 x 2 x 7
+  per baseline, reconstruction check 0.25 dB) -- what had never been run
+  on it were the three classification steps. And Baseline 2's
+  hyperparameters *had* been cross-checked against Han et al. on
+  2026-08-17 (this file, first session) -- only the report's Limitations
+  bullet still said otherwise. Both report bullets rewritten.
+
+- **`make condition-b && make sdr-accuracy-curve && make sdr-knee-point`
+  run to completion** (first time on the full sweep). Condition B, all six
+  baselines, 36 rows, same per-fold weights: isolated 50.0%; separated
+  33.3-41.7%; every paired delta positive (9-16 points), none significant
+  (p 0.30-0.57, n=5 folds). Baselines 1, 4 and 6 give *identical* 36
+  predictions -- the SVM's Murmur attractor swallows what distinguishes
+  them. Knee points (Arch 1): B1 17.0, B2 7.4, B3 15.0, B4 14.2, B5 18.1,
+  B6 21.7 dB, all clean crossings; every baseline's real output (2.6-5.5
+  dB) sits 5-17 dB *below* its knee. **Headline, stated as a region not
+  a number**: a separator needs ~15 dB heart SDR before its output beats
+  the raw mixture for this classifier, and the best method delivers 5.5.
+  One row is 2.8 points and the binomial 95% CI at n=36 is ~+/-16 points,
+  wider than the spread between all six curves -- individual knee values
+  are not distinguishable, the shared shape is.
+
+- **Architecture 2 (log-mel + CNN) was underfitting, not overfitting.**
+  Training accuracy of the 30% configuration was 23-40% per fold. Causes:
+  unnormalised log-mel (mean -12.4) and 40 full-batch steps total. Fix in
+  `heart_classifier_cnn.py`: per-mel-bin standardisation from the
+  training fold (stored on the classifier), mini-batch 8, 300 epochs,
+  weight decay 1e-3; network unchanged. Three configs run, all disclosed
+  in the module docstring, selected on training fit (first to clear 85%
+  on every fold): **62.0% +/- 15.7% CV accuracy, macro-F1 0.44** (Arch 1:
+  58.0 +/- 7.3, 0.43). Rhythm Disorder still 0% recall on both
+  architectures. Caveat kept in the report: the adopted config also has
+  the best test accuracy of the three; fold spread 40-80%.
+
+  **Cross-architecture knee verdict: values disagree, shape agrees.**
+  Arch 2 knees: B1 11.4, B4 9.9, B5 8.8 dB; B2/B3/B6 "always above" (their
+  real output already classifies >= raw mixture on the CNN). Spread vs
+  Arch 1 is 4.4-9.3 dB, over the 3 dB tolerance -> `agrees=False` or None
+  for every baseline. Partly a lower reference bar (36.1% vs 41.7%),
+  partly that the CNN groups mask/network methods (B2, B3, B6) above
+  filter/decomposition ones (B1, B5) at every SDR, which the SVM does not.
+  Both curves rise monotonically and both put every method's operating
+  point below its knee region -- that is the claim the report now makes.
+
+- **`src/oracle_mask_ceiling.py`** (new, `make oracle-mask-ceiling`,
+  5 tests) -- the self_learning.md one-row oracle probe made re-runnable
+  over all 36 valid rows: IRM / Wiener / binary masks from the true
+  spectrograms on Baseline 2's STFT grid (512/256), vs Baseline 0 and 1.
+  **Refutes the note**: IRM 11.5 +/- 1.9 dB heart, 9.2 +/- 1.7 lung; Wiener
+  12.4 / 10.6; raw mixture 2.5 / -2.0; bandpass 5.5 / 4.1. Baseline 2 sits
+  7.8 / 9.7 dB under its own family's ceiling -- the shortfall is the
+  method's, not the dataset's. The one-row note was almost certainly on a
+  non-additive row. A different ceiling *is* established: a magnitude mask
+  on this STFT grid caps near 12 dB, below Arch 1's 14-22 dB knee region.
+
+- **`report/report.tex` + `report_vi.tex`** updated together (abstract,
+  sweep status, Condition B table x6, knee figure + table, Arch 2 tuning +
+  second curve + comparison table + verdict, Discussion oracle paragraph,
+  four Limitations bullets); both compile clean (EN 49 pp. pdflatex, VI 56
+  pp. tectonic), label/ref sets identical. VI also gained the whole
+  embedded-deployment Section 10 it had been missing since 2026-08-29.
+  Left alone: the Introduction's "31 tests total" (now 178) -- pre-existing,
+  not part of this pass.
+
+## Open / next up (updated 2026-09-13)
+
+- **Run the sweep + both classifiers on the synthetic substrate** (1500
+  rows) -- the only way to tighten the +/-16-point resolution that makes
+  knee values classifier-dependent.
+- **Arch 2: second seed or nested selection** to separate configuration
+  from fold draw in the 62.0%.
+- Carried over: Baseline 2 port, ESP32-S3 hardware run, embedded-clip
+  representativeness note.
+
 ## Open / next up (updated 2026-09-09)
 
 - **Port Baseline 2** — the one feasible non-trivial method. Value is

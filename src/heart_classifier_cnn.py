@@ -42,6 +42,31 @@ plot_confusion_heatmap, generic over any true/pred predictions_df). Only
 feature extraction, the model, and the fit/predict loop are
 architecture-specific and defined here.
 
+Tuning history (2026-09-13). The first configuration -- raw log-mel input,
+40 full-batch Adam steps, no weight decay -- scored 30.0% Condition A
+accuracy with *training* accuracy of only 23-40% per fold: underfitting,
+not the overfitting the docstring above worried about. Two causes, both
+optimisation rather than architecture: the log-mel features sit around
+-12.4 +/- 2.3 (a 1e-6 floor on quiet recordings), which the first conv
+layer had to absorb before learning anything, and 40 full-batch steps is
+40 gradient updates in total. The fix is correspondingly plain: per-mel-bin
+standardisation using the training fold's own mean/std (stored on the
+classifier, applied identically at predict time, so nothing from a test
+fold leaks in), mini-batches of 8, 300 epochs, weight decay 1e-3.
+Three configurations were run, and all three are disclosed so the choice
+is auditable (5-fold, n=50, seed 0):
+
+    normalise only, 40 full-batch epochs        train 52-60%   test 52.0%
+    normalise, 200 epochs, batch 8, wd 1e-3     train 80-90%   test 56.0%
+    normalise, 300 epochs, batch 8, wd 1e-3     train 85-95%   test 62.0%   <- adopted
+
+The selection criterion was training-set fit -- the first configuration
+whose training accuracy cleared 85% on every fold, i.e. the point at
+which the model demonstrably stopped underfitting -- not test accuracy,
+though the reader should know the adopted configuration also has the
+highest test accuracy of the three and weigh that accordingly. No further
+search was done; the architecture itself is unchanged.
+
 Backend contract (what condition_b.py / sdr_accuracy_curve.py /
 sdr_knee_point.py call generically via a `backend` module parameter, so
 they run unchanged against either architecture):
@@ -67,8 +92,10 @@ N_MELS = 40
 N_FFT = 512
 HOP_LENGTH = 256
 RANDOM_SEED = 0
-MAX_EPOCHS = 40
+MAX_EPOCHS = 300
 LEARNING_RATE = 1e-3
+BATCH_SIZE = 8
+WEIGHT_DECAY = 1e-3
 
 
 def extract_features(y: np.ndarray, sr: int) -> np.ndarray:
@@ -121,6 +148,12 @@ class CNNClassifier:
         self.seed = seed
         self.max_epochs = max_epochs
         self.model: _ShallowCNN | None = None
+        # Per-mel-bin standardisation, fitted on the training fold only.
+        self.feat_mean: np.ndarray | None = None
+        self.feat_std: np.ndarray | None = None
+
+    def _normalise(self, X: np.ndarray) -> np.ndarray:
+        return (np.asarray(X, dtype=np.float32) - self.feat_mean) / self.feat_std
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "CNNClassifier":
         torch.manual_seed(self.seed)
@@ -131,25 +164,34 @@ class CNNClassifier:
         weights = torch.tensor(counts.sum() / np.maximum(counts, 1), dtype=torch.float32)
         weights = weights / weights.sum() * len(self.class_labels)
 
-        X_t = torch.tensor(np.asarray(X), dtype=torch.float32).unsqueeze(1)
+        X = np.asarray(X, dtype=np.float32)
+        self.feat_mean = X.mean(axis=(0, 2), keepdims=True)[0]
+        self.feat_std = X.std(axis=(0, 2), keepdims=True)[0] + 1e-6
+        X_t = torch.tensor(self._normalise(X)).unsqueeze(1)
         y_t = torch.tensor(y_idx, dtype=torch.long)
 
         self.model = _ShallowCNN(n_classes=len(self.class_labels))
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
         loss_fn = nn.CrossEntropyLoss(weight=weights)
+        shuffle = torch.Generator().manual_seed(self.seed)
 
         self.model.train()
         for _ in range(self.max_epochs):
-            optimizer.zero_grad()
-            loss = loss_fn(self.model(X_t), y_t)
-            loss.backward()
-            optimizer.step()
+            perm = torch.randperm(len(X_t), generator=shuffle)
+            for start in range(0, len(X_t), BATCH_SIZE):
+                idx = perm[start:start + BATCH_SIZE]
+                if len(idx) < 2:  # BatchNorm needs more than one sample
+                    continue
+                optimizer.zero_grad()
+                loss = loss_fn(self.model(X_t[idx]), y_t[idx])
+                loss.backward()
+                optimizer.step()
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         assert self.model is not None, "call .fit() before .predict()"
         self.model.eval()
-        X_t = torch.tensor(np.asarray(X), dtype=torch.float32).unsqueeze(1)
+        X_t = torch.tensor(self._normalise(X)).unsqueeze(1)
         with torch.no_grad():
             idx = self.model(X_t).argmax(dim=1).numpy()
         return np.array([self.class_labels[i] for i in idx])
