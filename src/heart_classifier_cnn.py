@@ -63,9 +63,14 @@ is auditable (5-fold, n=50, seed 0):
 The selection criterion was training-set fit -- the first configuration
 whose training accuracy cleared 85% on every fold, i.e. the point at
 which the model demonstrably stopped underfitting -- not test accuracy,
-though the reader should know the adopted configuration also has the
+though the reader should know the adopted configuration also had the
 highest test accuracy of the three and weigh that accordingly. No further
 search was done; the architecture itself is unchanged.
+
+Those three numbers predate heart_classifier.level_normalize (unit-RMS
+input, added later the same day after the Condition B audit -- see that
+function's docstring). With it and no other change the adopted
+configuration scores 62.0% +/- 3.9% (folds 60-70%), macro-F1 0.54.
 
 Backend contract (what condition_b.py / sdr_accuracy_curve.py /
 sdr_knee_point.py call generically via a `backend` module parameter, so
@@ -85,7 +90,7 @@ import torch.nn as nn
 import torch.nn.functional as Fnn
 from sklearn.metrics import accuracy_score, f1_score
 
-from heart_classifier import CLASS_GROUPS, aggregate_ci95, assign_classifier_folds
+from heart_classifier import CLASS_GROUPS, aggregate_ci95, assign_classifier_folds, level_normalize
 from load_dataset import load_audio
 
 N_MELS = 40
@@ -109,7 +114,10 @@ def extract_features(y: np.ndarray, sr: int) -> np.ndarray:
     """
     import librosa
 
-    mel = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LENGTH)
+    # Unit-RMS first (heart_classifier.level_normalize): separated inputs
+    # are 20-25x louder than the training recordings and log-mel is
+    # level-dependent -- see that function's docstring for the audit.
+    mel = librosa.feature.melspectrogram(y=level_normalize(y), sr=sr, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LENGTH)
     return np.log(mel + 1e-6).astype(np.float32)
 
 

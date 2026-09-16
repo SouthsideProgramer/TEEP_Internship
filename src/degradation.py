@@ -167,6 +167,125 @@ def find_alpha_for_target_sdr(
     return mid
 
 
+# ---------------------------------------------------------------------------
+# Exact SDR(alpha) and the grid-based root finder (2026-09-13). Replaces the
+# bisection above for the sweep. The blend is linear in alpha and mir_eval's
+# decomposition is a fixed linear projection, so every component of the
+# degraded estimate is the same convex combination of the components of g
+# and of s; SDR(alpha) is then a ratio of two quadratics and can be
+# evaluated exactly on a dense grid from two decompositions. The bisection
+# assumed monotonicity; sdr_alpha_audit.py found 7/216 heart curves
+# (all Conv-TasNet-lite) that are not, so the sweep now uses this instead.
+# ---------------------------------------------------------------------------
+ALPHA_GRID = np.linspace(0.0, 1.0, 1001)
+ALPHA_RULE = "smallest_root_from_clean"
+_FLEN = 512  # mir_eval bss_eval_sources' fixed distortion-filter length
+
+
+def _target_and_error(reference_sources, estimate, j):
+    from mir_eval.separation import _bss_decomp_mtifilt
+
+    s_true, e_spat, e_interf, e_artif = _bss_decomp_mtifilt(reference_sources, estimate, j, _FLEN)
+    return s_true + e_spat, e_interf + e_artif  # mir_eval's SDR numerator / denominator
+
+
+def sdr_curve_closed_form(reference_sources, g, s, j, alphas=ALPHA_GRID) -> np.ndarray:
+    """SDR(alpha) of (1-alpha) g + alpha s against reference j, exactly."""
+    t0, e0 = _target_and_error(reference_sources, g, j)
+    t1, e1 = _target_and_error(reference_sources, s, j)
+    T00, T01, T11 = t0 @ t0, t0 @ t1, t1 @ t1
+    E00, E01, E11 = e0 @ e0, e0 @ e1, e1 @ e1
+    a = np.asarray(alphas, dtype=float)
+    num = (1 - a) ** 2 * T00 + 2 * a * (1 - a) * T01 + a**2 * T11
+    den = (1 - a) ** 2 * E00 + 2 * a * (1 - a) * E01 + a**2 * E11
+    return 10 * np.log10(np.maximum(num, 1e-300) / np.maximum(den, 1e-300))
+
+
+def grid_roots(alphas, sdr, target) -> list[float]:
+    """Every alpha where the piecewise-linear interpolant of the grid crosses target."""
+    roots = []
+    for i in range(len(alphas) - 1):
+        s0, s1 = sdr[i], sdr[i + 1]
+        if s0 == target:
+            roots.append(float(alphas[i]))
+        elif (s0 - target) * (s1 - target) < 0:
+            roots.append(float(alphas[i] + (target - s0) / (s1 - s0) * (alphas[i + 1] - alphas[i])))
+    if sdr[-1] == target:
+        roots.append(float(alphas[-1]))
+    return roots
+
+
+def _quadratic_coefficients(reference_sources, g, s, j):
+    """(T00, T01, T11, E00, E01, E11): SDR(alpha) = 10 log10 N(alpha)/D(alpha) with
+    N, D the quadratics in alpha built from these six inner products."""
+    t0, e0 = _target_and_error(reference_sources, g, j)
+    t1, e1 = _target_and_error(reference_sources, s, j)
+    return t0 @ t0, t0 @ t1, t1 @ t1, e0 @ e0, e0 @ e1, e1 @ e1
+
+
+def exact_roots(coeffs, target_db: float) -> list[float]:
+    """Every alpha in [0, 1] with SDR(alpha) == target_db, solved exactly:
+    N(alpha) - k D(alpha) = 0, k = 10^(target/10), is a quadratic in alpha."""
+    T00, T01, T11, E00, E01, E11 = coeffs
+    k = 10 ** (target_db / 10)
+    c00, c01, c11 = T00 - k * E00, T01 - k * E01, T11 - k * E11
+    # (1-a)^2 c00 + 2a(1-a) c01 + a^2 c11  =  A a^2 + B a + C
+    A, B, C = c00 - 2 * c01 + c11, 2 * (c01 - c00), c00
+    if abs(A) < 1e-300 * max(1.0, abs(B), abs(C)):
+        roots = [-C / B] if B != 0 else []
+    else:
+        disc = B * B - 4 * A * C
+        if disc < 0:
+            return []
+        sq = np.sqrt(disc)
+        roots = [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]
+    return sorted(float(r) for r in roots if -1e-12 <= r <= 1 + 1e-12)
+
+
+def find_alphas_for_target_sdrs_grid(
+    heart_ref, lung_ref, heart_est, lung_est, target_sdrs, source: str = "heart", alphas=ALPHA_GRID
+) -> dict:
+    """
+    Replacement for the bisection in find_alphas_for_target_sdrs(). The
+    dense grid `alphas` is used only to audit the shape of SDR(alpha)
+    (monotone? where is its minimum?); each target's alpha is solved
+    EXACTLY as a root of the quadratic N(alpha) - 10^(t/10) D(alpha) = 0,
+    so steepness near alpha=0 costs nothing. Rule ALPHA_RULE: the SMALLEST
+    root in [0, 1] -- the crossing on the branch that starts at the ground
+    truth walking toward the method's real output. A target above SDR(0)
+    or with no root in [0, 1] is reported unattainable; the caller decides
+    what to do (sdr_sweep.py clamps to alpha=1 and records the clamp).
+
+    Returns {target: {"alpha": float | None, "attainable": bool, "n_roots": int}}
+    plus "_curve": {"monotone_decreasing", "n_reversals", "max_reversal_db",
+    "sdr_at_0", "sdr_at_1", "sdr_min"} from the grid audit.
+    """
+    refs = np.stack([np.asarray(heart_ref), np.asarray(lung_ref)])
+    j = SOURCE_LABELS.index(source)
+    g, s = (heart_ref, heart_est) if source == "heart" else (lung_ref, lung_est)
+    n = min(len(g), len(s), refs.shape[1])
+    refs, g, s = refs[:, :n], np.asarray(g)[:n], np.asarray(s)[:n]
+    coeffs = _quadratic_coefficients(refs, g, s, j)
+    T00, T01, T11, E00, E01, E11 = coeffs
+    a = np.asarray(alphas, dtype=float)
+    num = (1 - a) ** 2 * T00 + 2 * a * (1 - a) * T01 + a**2 * T11
+    den = (1 - a) ** 2 * E00 + 2 * a * (1 - a) * E01 + a**2 * E11
+    sdr = 10 * np.log10(np.maximum(num, 1e-300) / np.maximum(den, 1e-300))
+    d = np.diff(sdr)
+    rev = d > 1e-6
+    out = {"_curve": {
+        "monotone_decreasing": bool(not rev.any()), "n_reversals": int(rev.sum()),
+        "max_reversal_db": float(d[rev].max()) if rev.any() else 0.0,
+        "sdr_at_0": float(sdr[0]), "sdr_at_1": float(sdr[-1]), "sdr_min": float(sdr.min()),
+    }}
+    for target in target_sdrs:
+        t = float(target)
+        roots = exact_roots(coeffs, t) if t <= sdr[0] else []
+        roots = [min(max(r, 0.0), 1.0) for r in roots]
+        out[t] = {"alpha": (roots[0] if roots else None), "attainable": bool(roots), "n_roots": len(roots)}
+    return out
+
+
 def find_alphas_for_target_sdrs(
     heart_ref, lung_ref, heart_est, lung_est, target_sdrs, source: str = "heart",
     n_probe: int = 13, tol: float = 0.1, max_refine_iter: int = 8, compute_permutation: bool = True,

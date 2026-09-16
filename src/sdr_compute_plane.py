@@ -47,22 +47,51 @@ Usage:
 """
 from pathlib import Path
 
+# Fallbacks only. Both dictionaries are overridden at run time from the
+# canonical row-level file (results/canonical_rows.csv -> pooled heart SDR,
+# 95% t-CI over the 36 rows) and the latest latency run (results/latency.csv),
+# so the plane is derived from the same artifacts as every other table.
 SDR_HEART_DB = {
-    "Baseline 1 (bandpass)": (5.46, 2.57),
-    "Baseline 2 (supervised NMF)": (2.58, 1.80),
-    "Baseline 3 (standard NMF)": (3.35, 1.82),
-    "Baseline 4 (MSSA)": (5.02, 2.81),
-    "Baseline 5 (EVMD)": (3.61, 2.27),
-    "Baseline 6 (Conv-TasNet-lite)": (5.15, 2.74),
+    "Baseline 1 (bandpass)": (5.46, 2.66),
+    "Baseline 2 (supervised NMF)": (2.58, 1.87),
+    "Baseline 3 (standard NMF)": (3.35, 1.88),
+    "Baseline 4 (MSSA)": (5.02, 2.91),
+    "Baseline 5 (EVMD)": (3.61, 2.35),
+    "Baseline 6 (Conv-TasNet-lite)": (5.02, 2.77),
 }
 
-LATENCY_MS = {
-    "Baseline 1 (bandpass)": 36.003,
-    "Baseline 2 (supervised NMF)": 5200.305,
-    "Baseline 3 (standard NMF)": 21035.749,
-    "Baseline 4 (MSSA)": 12909.875,
-    "Baseline 5 (EVMD)": 90075.068,
-    "Baseline 6 (Conv-TasNet-lite)": 23.906,
+
+def load_canonical_sdr() -> dict | None:
+    """Pooled heart SDR (mean, 95% CI) per baseline from canonical_summary.csv, or None."""
+    import pandas as pd
+    from report_utils import results_dir
+
+    path = results_dir() / "canonical_summary.csv"
+    if not path.is_file():
+        return None
+    s = pd.read_csv(path)
+    s = s[(s["source"] == "heart") & s["method"].isin(SDR_HEART_DB)]
+    return {r["method"]: (float(r["sdr_pooled_mean"]), float(r["sdr_pooled_ci95"])) for _, r in s.iterrows()}
+
+
+def load_latency_ms() -> dict | None:
+    """Median wall-clock ms per baseline from the latest latency.py run, or None."""
+    import pandas as pd
+    from report_utils import results_dir
+
+    path = results_dir() / "latency.csv"
+    if not path.is_file():
+        return None
+    d = pd.read_csv(path).set_index("method")
+    return {m: float(d.loc[m, "wall_median_ms"]) for m in LATENCY_MS if m in d.index}
+
+LATENCY_MS = {  # 2026-09-13 idle-machine run (load 0.6/16); the 2026-08-27 run at load 74.6 gave 36 / 5200 / 21036 / 12910 / 90075 / 24 ms
+    "Baseline 1 (bandpass)": 3.632,
+    "Baseline 2 (supervised NMF)": 17.181,
+    "Baseline 3 (standard NMF)": 61.371,
+    "Baseline 4 (MSSA)": 1097.018,
+    "Baseline 5 (EVMD)": 16812.144,
+    "Baseline 6 (Conv-TasNet-lite)": 16.690,
 }
 
 
@@ -123,7 +152,7 @@ def plot_sdr_compute_plane(sdr_mean: dict, sdr_ci: dict, macs: dict, latency_ms:
 
     for ax, compute, xlabel, title in [
         (axes[0], macs, "MACs per inference (log scale)", "SDR vs. MACs (theoretical compute)"),
-        (axes[1], latency_ms, "Median wall-clock latency, ms (log scale)", "SDR vs. desktop latency (measured, contended machine)"),
+        (axes[1], latency_ms, "Median wall-clock latency, ms (log scale)", "SDR vs. desktop latency (measured, idle machine)"),
     ]:
         for method in methods:
             dominated = is_pareto_dominated(method, sdr_mean, compute)
@@ -161,6 +190,14 @@ if __name__ == "__main__":
 
     print("Using this project's own already-measured SDR values (see SDR_HEART_DB's provenance comments;")
     print("Baseline 6 was independently re-measured and confirmed this session -- measure_baseline6_sdr()).")
+    canonical = load_canonical_sdr()
+    if canonical and len(canonical) == len(SDR_HEART_DB):
+        SDR_HEART_DB.update(canonical)
+        print("SDR from results/canonical_summary.csv (pooled, 95% CI over 36 rows)")
+    latest_latency = load_latency_ms()
+    if latest_latency and len(latest_latency) == len(LATENCY_MS):
+        LATENCY_MS.update(latest_latency)
+        print("latency from results/latency.csv")
     sdr_mean = {k: v[0] for k, v in SDR_HEART_DB.items()}
     sdr_ci = {k: v[1] for k, v in SDR_HEART_DB.items()}
 

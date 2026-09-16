@@ -21,7 +21,8 @@ TORCH_INDEX := https://download.pytorch.org/whl/cu121
         sdr-accuracy-curve sdr-knee-point compute-cost heart-classifier-cnn latency sdr-compute-plane \
         stats plots firmware firmware-coeffs firmware-clips firmware-test \
         firmware-protocol-test firmware-build firmware-on-device \
-        firmware-causal-check oracle-mask-ceiling clean clean-pyc clean-all
+        firmware-causal-check oracle-mask-ceiling sdr-knee-bootstrap sdr-alpha-audit canonical-rows \
+        condition-b-stats additive-audit-sensitivity trajectory-points clean clean-pyc clean-all
 
 .DEFAULT_GOAL := help
 
@@ -102,6 +103,23 @@ help:
 	@echo "                              heart_classifier.py's own report -> results/"
 	@echo "                              heart_classifier_cnn_report.html. sdr-knee-point (above) runs"
 	@echo "                              both architectures and compares their knee points."
+	@echo ""
+	@echo "Audit and canonical artifacts (2026-09-13 review):"
+	@echo "  make sdr-alpha-audit            exact SDR(alpha) for every (baseline,row,source): monotonicity,"
+	@echo "                                  attainability, root count, bisection-vs-exact -> results/sdr_alpha_audit_report.html"
+	@echo "  make canonical-rows             ONE row-level file (SDR/SIR/SAR + both classifiers' predictions on the"
+	@echo "                                  cached separated audio) -> results/canonical_rows.csv, canonical_summary.csv"
+	@echo "  make condition-b-stats          leak-group cluster bootstrap CIs, group sign-flip permutation, McNemar"
+	@echo "                                  for Condition B, both architectures -> results/condition_b_stats_report.html"
+	@echo "  make additive-audit-sensitivity DC / polarity / +-100-sample shift / two-gain relaxations of the"
+	@echo "                                  additive audit -> results/additive_audit_sensitivity_report.html"
+	@echo "  make trajectory-points          pointwise leak-group bootstrap bands, n_attainable / multi-root per"
+	@echo "                                  point, and the paper figure -> results/trajectory_points.csv,"
+	@echo "                                  results/plots/trajectories_bands.{png,pdf}"
+	@echo ""
+	@echo "Knee-point bootstrap (src/sdr_knee_bootstrap.py) -> results/sdr_knee_bootstrap_report.html:"
+	@echo "  make sdr-knee-bootstrap   row + leak-group bootstrap CIs for every knee point, both"
+	@echo "                            architectures (reads the per-row curve CSVs; no re-classification)."
 	@echo ""
 	@echo "Oracle-mask ceiling (src/oracle_mask_ceiling.py) -> results/oracle_mask_ceiling_report.html:"
 	@echo "  make oracle-mask-ceiling   IRM / Wiener / binary oracle masks from the true sources on"
@@ -259,6 +277,24 @@ heart-classifier-cnn:
 
 oracle-mask-ceiling:
 	cd $(SRC) && ../$(PYTHON) oracle_mask_ceiling.py
+
+sdr-knee-bootstrap:
+	cd $(SRC) && ../$(PYTHON) sdr_knee_bootstrap.py --n-boot 2000 --seed 0
+
+sdr-alpha-audit:
+	cd $(SRC) && MPLBACKEND=Agg ../$(PYTHON) sdr_alpha_audit.py
+
+canonical-rows:
+	cd $(SRC) && ../$(PYTHON) canonical_rows.py
+
+condition-b-stats:
+	cd $(SRC) && ../$(PYTHON) condition_b_stats.py --n-boot 5000 --n-perm 20000 --seed 0
+
+additive-audit-sensitivity:
+	cd $(SRC) && MPLBACKEND=Agg ../$(PYTHON) additive_audit_sensitivity.py
+
+trajectory-points:
+	cd $(SRC) && MPLBACKEND=Agg ../$(PYTHON) trajectory_points.py --n-boot 2000 --seed 0
 
 stats:
 	cd $(SRC)/statistics && ../../$(PYTHON) audio_quality.py

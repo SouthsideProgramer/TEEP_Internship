@@ -58,6 +58,48 @@ import numpy as np
 N_TRIALS = 5
 N_WARMUP = 1
 N_TRIALS_SLOW = 3
+CLIP_SECONDS = 15.0  # the timed input: one 60,000-sample clip at 4000 Hz
+
+
+def environment() -> dict:
+    """What a reader needs to interpret an absolute latency: hardware,
+    OS, library versions, thread counts, and the load average at call
+    time. Recorded into the report rather than left to the prose."""
+    import platform
+    import re
+    import subprocess
+
+    env = {"os": platform.platform(), "python": platform.python_version(), "n_cpus": os.cpu_count()}
+    try:
+        cpuinfo = open("/proc/cpuinfo").read()
+        m = re.search(r"model name\s*:\s*(.+)", cpuinfo)
+        env["cpu_model"] = m.group(1).strip() if m else "unknown"
+    except OSError:
+        env["cpu_model"] = "unknown"
+    try:
+        mem_kb = int(re.search(r"MemTotal:\s*(\d+)", open("/proc/meminfo").read()).group(1))
+        env["ram_gb"] = round(mem_kb / 1e6, 1)
+    except (OSError, AttributeError):
+        env["ram_gb"] = "unknown"
+    try:
+        env["gpu"] = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                    capture_output=True, text=True, timeout=10).stdout.strip().splitlines()[0]
+    except Exception:
+        env["gpu"] = "none / nvidia-smi unavailable"
+    for mod in ("numpy", "scipy", "librosa", "sklearn", "torch", "mir_eval"):
+        try:
+            env[f"{mod}_version"] = __import__(mod).__version__
+        except Exception:
+            env[f"{mod}_version"] = "n/a"
+    try:
+        import torch
+        env["torch_threads"] = torch.get_num_threads()
+        env["torch_device_for_conv_tasnet"] = "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        pass
+    env["omp_num_threads"] = os.environ.get("OMP_NUM_THREADS", "unset")
+    env["loadavg_1_5_15"] = ", ".join(f"{x:.2f}" for x in os.getloadavg())
+    return env
 
 
 def time_calls(fn, n_trials: int = N_TRIALS, n_warmup: int = N_WARMUP) -> dict:
@@ -79,10 +121,14 @@ def time_calls(fn, n_trials: int = N_TRIALS, n_warmup: int = N_WARMUP) -> dict:
     cpu = np.array(cpu_times)
     return {
         "n_trials": n_trials,
+        "n_warmup": n_warmup,
         "wall_median_s": float(np.median(wall)),
         "wall_iqr_s": float(np.percentile(wall, 75) - np.percentile(wall, 25)),
+        "wall_p5_s": float(np.percentile(wall, 5)),
+        "wall_p95_s": float(np.percentile(wall, 95)),
         "cpu_median_s": float(np.median(cpu)),
         "cpu_iqr_s": float(np.percentile(cpu, 75) - np.percentile(cpu, 25)),
+        "real_time_factor": float(CLIP_SECONDS / np.median(wall)),  # >1 = faster than real time
     }
 
 
@@ -162,6 +208,8 @@ if __name__ == "__main__":
 
     loadavg_1, loadavg_5, loadavg_15 = os.getloadavg()
     n_cpus = os.cpu_count()
+    env = environment()
+    print("Environment:", env)
     print(f"Machine load at measurement start: {loadavg_1:.1f}, {loadavg_5:.1f}, {loadavg_15:.1f} ({n_cpus} CPUs)")
     print("(uniform protocol: same code/repetitions/input per method regardless of ambient load -- see module docstring)")
 
@@ -187,12 +235,23 @@ if __name__ == "__main__":
         stat_tile("Slowest method", df["wall_median_s"].idxmax(), f"{df['wall_median_s'].max():.2f}s median wall-clock"),
     ])
 
-    display_df = df[["n_trials", "wall_median_ms", "wall_iqr_ms", "cpu_median_ms", "cpu_iqr_ms"]]
+    df["wall_p5_ms"] = df["wall_p5_s"] * 1000
+    df["wall_p95_ms"] = df["wall_p95_s"] * 1000
+    df.to_csv(results_dir() / "latency.csv")
+    env_df = pd.DataFrame({"value": pd.Series(env, dtype=object)})
+    env_df.to_csv(results_dir() / "latency_environment.csv")
+
+    display_df = df[["n_trials", "n_warmup", "wall_median_ms", "wall_iqr_ms", "wall_p5_ms", "wall_p95_ms", "cpu_median_ms", "cpu_iqr_ms", "real_time_factor"]]
     body = "\n\n".join([
         section(
             "Inference latency per method",
-            "one real 60,000-sample (15s @ 4000 Hz) mixture/recording; median + IQR across n_trials timed repetitions after 1 untimed warm-up",
+            "one real 60,000-sample (15s @ 4000 Hz) mixture/recording; median, IQR and p5-p95 across n_trials timed repetitions after n_warmup untimed warm-ups; real_time_factor = 15 s / median wall (>1 is faster than real time). Preprocessing inside each method's separate() call (e.g. Baseline 2's denoising bandpass, STFT) is included; one-time fitting/training is not.",
             df_to_html(display_df, index_label="method", float_fmt="{:.2f}"),
+        ),
+        section(
+            "Measurement environment",
+            "recorded at run time; results/latency_environment.csv",
+            df_to_html(env_df, index_label="key"),
         ),
     ])
 

@@ -1638,6 +1638,201 @@ Generated output dirs (`src/visualization/plots/`,
   Left alone: the Introduction's "31 tests total" (now 178) -- pre-existing,
   not part of this pass.
 
+## Done (2026-09-13, later session) -- Condition B audit
+
+- **The "B1, B4 and B6 give identical predictions" result was a defect,
+  not a finding -- and not a pointer bug.** Checked first: the cached
+  separated WAVs differ per method (hash, RMS) and `estimate_path()`
+  resolves each baseline to its own directory. The classifier saw
+  different audio and answered the same thing because of *level*: HS.csv
+  training recordings are 0.0005-0.013 RMS, every separator's heart
+  estimate inherits the mixture's peak-normalising gain and sits at
+  0.03-0.09 RMS (20-25x louder). MFCC[0] is log-energy -> separated
+  inputs at standardised distance 11-15 vs a training cloud with max 7.4;
+  the RBF kernel is ~0 out there, `decision_function` was the same vector
+  for B1 and B6 alike, and the prediction was a per-fold constant (fold 0
+  -> Rhythm Disorder, folds 1-4 -> Murmur). The sweep blend
+  (1-a)*ref + a*est also dragged loudness back into range as SDR rose, so
+  the first curve was partly loudness-vs-SDR.
+
+  **Fix**: `heart_classifier.level_normalize()` -- unit-RMS before feature
+  extraction, applied by both backends at train and inference. Nothing
+  else changed. Isolated refs now sit inside the training cloud (|z|~1
+  per feature); separated estimates remain outside (8-13) on MFCC1-4
+  (spectral shape) -- the distortion Condition B is meant to measure.
+  Pre-fix results archived in the session scratchpad only.
+
+- **Re-run, all numbers replaced.** Condition A: Arch 1 60.0 +/- 10.7%
+  (F1 0.43), Arch 2 62.0 +/- 3.9% (F1 0.54, recalls 67/71/71/30).
+  Condition B (isolated 52.8%): B1 30.6, B2 41.7, B3 27.8, B4 36.1, B5
+  27.8, B6 36.1; deltas 11-26 pts, only B3 significant (p=0.010).
+  Predictions now vary; the three spectral-stripping methods (B1, B4, B5)
+  still agree on 31-34/36, the mask methods (B2, B6) do not.
+  Knee, Arch 1 (ref 38.9%): B1 17.8, B3 15.0, B4 15.6, B5 18.2, B6 6.7,
+  B2 always above. Arch 2 (ref 33.3%): B1 9.3, B3 3.9, B4 9.3, B5 7.9,
+  B2/B6 always above. Spread 6-11 dB, `agrees=False` for all four.
+  **What survives both classifiers**: the grouping. Supervised NMF (lowest
+  SDR, 2.6 dB) never falls below no-separation under either; Conv-TasNet
+  never under the CNN; the strippers (bandpass/MSSA/EVMD) cross at 15-18
+  (SVM) / 8-9 dB (CNN), far above their 3.6-5.5 dB operating points.
+  The classifier responds to spectral-envelope preservation, not SDR as
+  such. Headline region is now 15-18 dB (was 14-22).
+
+- **results/plots/ had been emptied** between sessions (only today's
+  files present); `server_vs_board.{png,pdf}` and `sdr_compute_plane.png`
+  regenerated (server re-timed at 45.6 cycles/sample, 274x -- matches).
+
+- report.tex + report_vi.tex: new "confound found and removed"
+  paragraphs in sec:conditionb, every Condition A/B, knee, Arch 2 and
+  Limitations number replaced, two new Limitations bullets (tuning
+  predates the fix; the confound was caught by symptom). EN 50 pp., VI 58
+  pp., both compile. `report/paper_inserts.tex` (+pdf) updated likewise,
+  plus a methods paragraph on level normalisation.
+
+- **Two table discrepancies flagged by review, root-caused and fixed.**
+  (1) `tab:leakgroups` listed 13 singleton groups; `split.py` gives 14
+  (29 groups, 145 rows). Transcription error from 08-17; cell fixed in
+  EN/VI/paper inserts, caption now says the sizes sum to 145. (2) The
+  Condition B delta column was `paired_delta_vs_isolated()`'s unweighted
+  mean of per-fold differences (folds 8/7/7/7/7) printed next to *pooled*
+  accuracies, so 52.8 - acc did not reproduce it (off by 0.3-1.1 pts).
+  Not a computation bug -- a convention mix. `condition_b.py` now emits
+  both `pooled_delta_accuracy` and `mean_delta_accuracy` with the formula
+  in the section text; every table shows both columns and says which the
+  t-test uses. Verified programmatically: pooled column == 52.8 - acc in
+  all three documents.
+
+- **Knee-point uncertainty, multiple comparisons, effective N** (reviewer
+  asks 1, 2, 4). `src/sdr_knee_bootstrap.py` (+2 tests,
+  `make sdr-knee-bootstrap`): 2000 replicates, rows i.i.d. and leak-group
+  cluster (24 groups in the 36-row basis), curve + SDR axis + reference
+  recomputed per replicate, knee via the same `find_knee_point`. Point
+  estimates reproduce the headline values exactly. Result: P(crossed)
+  0.15-0.98; every Arch-1 interval hits the 25 dB grid top; tightest
+  interval 12 dB wide (EVMD/CNN); cluster vs row bootstrap differ by
+  <~1 dB, so n=36 not dependence is the limit. Stable: the grouping
+  (strippers cross in 90-98% of CNN replicates, supervised NMF in 15%).
+  Multiple comparisons on Condition B's six p-values: Holm = Bonferroni =
+  BH q = 0.061 for B3, >=0.34 for the rest -> nothing significant after
+  correction; stated in text and captions. Effective N: 36 rows / 24
+  groups, Kish 17.5 at rho=1, ~29 at the observed ICC 0.24 (isolated),
+  ~36 on separated audio (ICC ~0). All written into report.tex (51 pp.),
+  report_vi.tex (60 pp.) and paper_inserts.tex.
+  Lung-side classification (ask 3) NOT done: lung estimates are cached
+  for all 6 baselines x 36 rows and LS.csv has 6 classes (12/9/9/8/7/5),
+  but there is no lung classifier; on the 36-row basis the classes are
+  12/10/9/2/2/1, so three classes would have <=2 test rows.
+
+## Done (2026-09-13, review pass) -- pipeline validity, unified SDR, statistics, latency
+
+- **SDR(alpha) is a closed form; the bisection assumed monotonicity and 7
+  curves violate it.** The blend is linear in alpha and mir_eval's
+  decomposition is a fixed projection, so SDR(alpha)=10log10 N/D with N, D
+  quadratics from two decompositions. `sdr_alpha_audit.py` (1001-pt grid,
+  all 432 curves): 425 monotone; 7 non-monotone, all Conv-TasNet heart
+  rows (near polarity-inverted estimates -> dip to -6..-20 dB at alpha
+  0.04-0.17, two roots per target). Closed form vs mir_eval < 1e-5 dB
+  except inside those dips, where mir_eval's permutation search swaps
+  heart/lung. On monotone rows the bisection was fine (median |dalpha|
+  2e-4, 90th pct 3.5e-3). **Replaced**: `degradation.
+  find_alphas_for_target_sdrs_grid` solves N - 10^(t/10) D = 0 exactly,
+  rule = smallest root in [0,1] (branch from the ground truth),
+  unattainable targets clamped to alpha=1 and flagged (never searched);
+  sweep points scored with fixed heart/lung assignment (permuted value
+  stored + flagged, 73 points). Provenance regenerated from the cache: 99
+  alphas moved >0.01, 55 points un-clamped, every attainable point now at
+  its target to 4 decimals. Curves, knee, bootstrap re-run.
+
+- **One canonical row-level file.** `canonical_rows.py` ->
+  `results/canonical_rows.csv` (36 rows x 8 methods x 2 sources: fold,
+  leak group, SDR/SIR/SAR of the cached separated audio, SVM and CNN
+  predictions on it). Explains the table mismatches the review found:
+  B1 5.61 vs 5.46 = fold-mean vs pooled of the same run; B2 3.78/-0.44
+  was a run predating the hop/denoise fix (now 2.69/0.62 fold, 2.58/0.71
+  pooled); B6 5.15 was a separate GPU training run (5.02 in the cached
+  run). The native-subset SDR table (tab:baselinevalid, now also carrying
+  the old pooledvalid/sixmethodnative labels) shows both conventions from
+  this one file; sdr_compute_plane.py reads SDR and latency from the
+  artifacts instead of hardcoded dicts.
+
+- **Leak-group-aware statistics** (`condition_b_stats.py`): cluster
+  bootstrap over the 24 leak groups for accuracy and paired delta CIs,
+  group sign-flip permutation p, McNemar mid-p, both architectures, plus
+  delta vs raw mixture. Condition B table now = Accuracy [CI], delta
+  [CI], delta_raw [CI]; fold-level t-tests demoted to the HTML report.
+  Finding: delta-vs-raw never favours separation (all CIs include or
+  are below 0). CNN on B1/B4/B5 gives identical predictions (per-fold
+  constant, 16.7%) -- spectral OOD collapse, now described as the
+  phenomenon, not a bug.
+
+- **Crossings re-done and reworded**: Arch 1 B1 20.1, B3 15.0, B4 15.6,
+  B5 18.2, B6 4.5 (one-row excursion), B2 always above; Arch 2 B1 9.3,
+  B4 9.4, B5 7.9, B2/B3/B6 always above. Bootstrap: P(crossed) 0.15-0.98,
+  every Arch-1 upper percentile "not identifiable" at the 25 dB grid top.
+  "knee" -> "raw-mixture crossing ... under the specified interpolation
+  protocol"; region 15-20 dB (SVM) / 8-9 dB (CNN); "curve" -> "trajectory";
+  3 dB = "the study's operational criterion"; 109 rows = "non-additive
+  under the named-reference test".
+
+- **Additive-audit sensitivity** (`additive_audit_sensitivity.py`): DC,
+  polarity (52 rows pick a<0, none pass), +-100-sample lag, two gains,
+  two gains + per-source lags: 36/145 under all seven models; passing
+  cluster 0.9-4.5e-4, failing >=0.94 (gap >2000x); 1e-2 and 1e-3 agree,
+  1e-4 admits 3 (16-bit floor); all files 4000 Hz.
+
+- **Latency re-measured on an idle machine** (load 0.6 vs 74.6):
+  B1 3.6 ms, classifier 3.7, B6 16.7 (GPU), B2 17.2, B3 61, B4 1097,
+  B5 16812 (0.89x real time). The loaded run had inflated CPU-bound
+  methods 10-340x and reordered the two fastest; **the "bandpass and
+  Conv-TasNet jointly non-dominated on latency" finding is retracted** --
+  bandpass now dominates on both planes. latency.py logs CPU/GPU/RAM/OS/
+  library versions/threads/p5-p95/real-time factor to
+  results/latency_environment.csv.
+
+- report.tex 54 pp., report_vi.tex 61 pp., paper_inserts.tex 6 pp. all
+  rebuilt; every changed number verified programmatically to appear in all
+  three (only the classifier's latency row is inserts-omitted by design).
+  Tests: 179 pass (+8 review-script tests, +3 degradation).
+
+- **Paper IV-F "Embedded Feasibility"** written into `report/paper.tex`
+  (subsection ~450 words, Table XV key/value, one Discussion paragraph;
+  compiles, 11 pp.). Numbers from `firmware/tools/embedded_feasibility.py`
+  (new; scores `capture_fpu.bin` vs a desktop *causal* reference and vs
+  zero-phase, both classifiers' predictions on all three, block-level
+  timing, static RAM/Flash from the PlatformIO build ->
+  `results/embedded_feasibility.csv`): board == causal ref to 3 decimals
+  of SDR, waveform error 1.2e-5 / 6.3e-7 max abs (0.7-2.0x scipy's own
+  float32 deviation), prediction agreement 3/3 for SVM and CNN, static
+  SRAM 45,992 B (17.5%), Flash 437,612 B (360,000 B clips), 0.89 ms per
+  256-sample block (1.4% duty), RTF 72. Stated as not measured: per-block
+  worst case, energy, mic path, other five baselines.
+
+- **Paper major-revision pass (review of 2026-09-13).** New
+  `src/trajectory_points.py` (`make trajectory-points`): per (arch,
+  baseline, target) pooled accuracy + 95% pointwise leak-group bootstrap
+  CI, n_rows, n_leak_groups, n_attainable, n_clamped, n_multi_root,
+  n_perm_flip, mean achieved SDR -> `results/trajectory_points.csv`, and
+  the publication figure `results/plots/trajectories_bands.{png,pdf}`
+  (bands, n_attainable annotated, hollow = <18 attainable). Finding: at
+  the -5/0 dB levels only 6-16 rows are attainable for every baseline;
+  bands >= 25 pts wide and overlapping for most pairs.
+  `report/paper.tex` (12 pp., compiles): Fig. 1 replaced by the bands
+  figure, Fig. 2 by the idle-machine plane (draft boxes removed); "knee"
+  -> "raw-mixture crossing" with an explicit operational definition;
+  new Table of every point (acc [CI] (n_a)); "Inference" paragraph
+  (percentile cluster bootstrap primary, group sign-flip permutation
+  secondary/unadjusted, exploratory); classifier training n and
+  per-fold class counts; sample-rate discrepancy stated in Methods with
+  the descriptor's 22,050 Hz vs the files' 4000 Hz and MD5 identity;
+  baseline configuration table (B1-B6 as run, verified against the code);
+  reproducibility statement (versions, seeds, hardware, make targets);
+  related-work summary table (rows cross-checked with report tab:related;
+  torabi_diss 26.8 dB is as cited in the paper's own Sec. II -- the
+  dissertation is not in papers/); substrate-table caption warning + EVMD
+  75-row justification; embedded section shortened to one paragraph +
+  table; "leakage-prone" softened. Every table number re-verified
+  programmatically against the result CSVs.
+
 ## Open / next up (updated 2026-09-13)
 
 - **Run the sweep + both classifiers on the synthetic substrate** (1500
@@ -1645,6 +1840,11 @@ Generated output dirs (`src/visualization/plots/`,
   knee values classifier-dependent.
 - **Arch 2: second seed or nested selection** to separate configuration
   from fold draw in the 62.0%.
+- **Lung-side Condition A/B** -- needs a lung classifier (HEART_TYPE_TO_GROUP
+  analogue for 6 lung classes), then the same pipeline; separated lung
+  audio already cached. Class support on the 36 rows is 12/10/9/2/2/1.
+- **Per-condition standardised-distance report** so an OOD collapse like
+  the level confound is visible before it is published.
 - Carried over: Baseline 2 port, ESP32-S3 hardware run, embedded-clip
   representativeness note.
 

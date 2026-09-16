@@ -209,13 +209,30 @@ def summarize_by_fold(predictions_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def paired_delta_vs_isolated(fold_summary: pd.DataFrame) -> pd.DataFrame:
+def paired_delta_vs_isolated(fold_summary: pd.DataFrame, baseline_summary: pd.DataFrame | None = None) -> pd.DataFrame:
     """
     PROTOCOL.md Sec. 5.4's primary result: accuracy_isolated - accuracy_separated,
     paired by fold, plus a paired t-test per baseline. n=5 folds -- per
     Sec. 6's own caveat, treat as indicative, not decisive.
+
+    Two deltas are reported, because they are not the same number and a
+    table that shows pooled accuracies next to a fold-paired delta invites
+    the reader to subtract and find a mismatch (which is how the
+    discrepancy was noticed, 2026-09-13):
+      mean_delta_accuracy   -- unweighted mean over folds of the per-fold
+                               difference; the quantity ttest_rel is run on.
+                               Folds are 8/7/7/7/7 rows on the 36-row basis,
+                               so every fold counts equally, not every row.
+      pooled_delta_accuracy -- pooled isolated accuracy minus pooled
+                               separated accuracy over all rows (what
+                               subtracting summarize_by_baseline's accuracy
+                               column gives). Only filled when
+                               baseline_summary is passed.
+    The two differ by up to ~1 point here; neither is wrong, but a table
+    must say which one it prints.
     """
     isolated = fold_summary[fold_summary["baseline"] == ISOLATED_LABEL].set_index("fold")["accuracy"]
+    pooled_isolated = float(baseline_summary.loc[ISOLATED_LABEL, "accuracy"]) if baseline_summary is not None else float("nan")
 
     rows = []
     for baseline in BASELINE_LABELS:
@@ -226,9 +243,14 @@ def paired_delta_vs_isolated(fold_summary: pd.DataFrame) -> pd.DataFrame:
             t_stat, p_value = stats.ttest_rel(paired["isolated"], paired["separated"])
         else:
             t_stat, p_value = float("nan"), float("nan")
+        pooled_delta = (
+            pooled_isolated - float(baseline_summary.loc[baseline, "accuracy"])
+            if baseline_summary is not None and baseline in baseline_summary.index else float("nan")
+        )
         rows.append({
             "baseline": baseline,
             "n_folds": len(paired),
+            "pooled_delta_accuracy": pooled_delta,
             "mean_delta_accuracy": float(delta.mean()) if len(delta) else float("nan"),
             "t_stat": float(t_stat),
             "p_value": float(p_value),
@@ -247,7 +269,7 @@ if __name__ == "__main__":
 
     baseline_summary = summarize_by_baseline(predictions_df)
     fold_summary = summarize_by_fold(predictions_df)
-    paired = paired_delta_vs_isolated(fold_summary)
+    paired = paired_delta_vs_isolated(fold_summary, baseline_summary)
 
     isolated_acc = baseline_summary.loc[ISOLATED_LABEL, "accuracy"]
     worst_baseline = baseline_summary.drop(ISOLATED_LABEL)["accuracy"].idxmin()
@@ -288,7 +310,7 @@ if __name__ == "__main__":
         ),
         section(
             "Paired delta vs. isolated (PROTOCOL.md Sec. 5.4)",
-            "accuracy_isolated - accuracy_separated, paired by fold, with a paired t-test (n=5 folds -- indicative, not decisive)",
+            "pooled_delta_accuracy = pooled isolated acc - pooled separated acc (subtract the table above); mean_delta_accuracy = unweighted mean of per-fold differences (folds 8/7/7/7/7 rows), the quantity the paired t-test uses -- the two differ by up to ~1 point because folds are unequal; n=5 folds, indicative not decisive",
             df_to_html(paired, index_label="baseline", float_fmt="{:.3f}"),
         ),
         section("Failure mode analysis: confusion matrices per condition", "", "\n\n".join(confusion_sections)),

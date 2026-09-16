@@ -90,11 +90,32 @@ def add_class_group(hs_df: pd.DataFrame) -> pd.DataFrame:
     return hs_df
 
 
+def level_normalize(y: np.ndarray) -> np.ndarray:
+    """Scale a waveform to unit RMS before feature extraction, so the
+    classifier is invariant to absolute recording level.
+
+    Why (found 2026-09-13, Condition B audit): HS.csv recordings span
+    0.0005-0.013 RMS, while every separation baseline's heart estimate
+    inherits the mixture's peak-normalising gain and sits at 0.03-0.09 RMS
+    -- 20-25x louder than anything the classifier trained on. MFCC[0] is
+    log-energy, so separated inputs landed at z-norm 11-15 against a
+    training cloud whose maximum is 7.4; the RBF kernel evaluates to ~0
+    that far out and the SVM returned a per-fold constant regardless of
+    the audio (B1, B4 and B6 produced identical 36-row predictions). The
+    sweep's alpha-blend also moved loudness back toward the training range
+    as SDR rose, confounding the accuracy-vs-SDR curve with level. Unit-RMS
+    normalisation removes the confound; both backends apply it."""
+    y = np.asarray(y, dtype=np.float64)
+    rms = float(np.sqrt(np.mean(y**2)))
+    return y / rms if rms > 0 else y
+
+
 def extract_features(y: np.ndarray, sr: int) -> np.ndarray:
-    """13 MFCCs -> per-coefficient mean and std over time -> 26-dim feature vector."""
+    """13 MFCCs -> per-coefficient mean and std over time -> 26-dim feature
+    vector, on the level-normalised waveform (level_normalize)."""
     import librosa
 
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=N_MFCC, n_fft=N_FFT, hop_length=HOP_LENGTH)
+    mfcc = librosa.feature.mfcc(y=level_normalize(y), sr=sr, n_mfcc=N_MFCC, n_fft=N_FFT, hop_length=HOP_LENGTH)
     return np.concatenate([mfcc.mean(axis=1), mfcc.std(axis=1)])
 
 

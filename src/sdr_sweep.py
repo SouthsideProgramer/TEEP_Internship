@@ -49,7 +49,7 @@ from pathlib import Path
 import pandas as pd
 import soundfile as sf
 
-from degradation import degrade_row, degrade_toward_ground_truth, find_alphas_for_target_sdrs
+from degradation import ALPHA_RULE, degrade_row, degrade_toward_ground_truth, find_alphas_for_target_sdrs_grid
 from load_dataset import load_audio, load_hs, load_ls, load_mix, verify_additive_triplets
 from metrics import SOURCE_LABELS
 from report_utils import results_dir
@@ -127,10 +127,21 @@ def _target_grid_rows(
     target_grid value for every source and return the provenance rows."""
     rows = []
     for source in sources:
-        alphas_by_target = find_alphas_for_target_sdrs(heart_ref, lung_ref, heart_est, lung_est, target_grid, source=source)
+        # Grid-based, exact SDR(alpha); replaces the bisection (see degradation.py,
+        # find_alphas_for_target_sdrs_grid). An unattainable target -- below the
+        # curve's minimum, which for a monotone curve is the method's own real
+        # output -- is clamped to alpha=1 and flagged, never searched for.
+        found = find_alphas_for_target_sdrs_grid(heart_ref, lung_ref, heart_est, lung_est, target_grid, source=source)
+        curve_info = found["_curve"]
         for target in target_grid:
-            alpha = alphas_by_target[float(target)]
-            measured = degrade_row(heart_ref, lung_ref, heart_est, lung_est, alpha, source)[source]
+            hit = found[float(target)]
+            alpha = hit["alpha"] if hit["attainable"] else 1.0
+            # Fixed assignment (heart estimate scored against the heart reference):
+            # inside a non-monotone dip the heart estimate is near-cancelled and
+            # mir_eval's permutation search would score the lung estimate as
+            # "heart" instead. Both are recorded; the x-axis uses the fixed one.
+            measured = degrade_row(heart_ref, lung_ref, heart_est, lung_est, alpha, source, compute_permutation=False)[source]
+            measured_perm = degrade_row(heart_ref, lung_ref, heart_est, lung_est, alpha, source, compute_permutation=True)[source]
             rows.append({
                 "baseline": label,
                 "fold": int(fold),
@@ -143,7 +154,15 @@ def _target_grid_rows(
                 "achieved_sdr": measured["sdr"],
                 "achieved_sir": measured["sir"],
                 "achieved_sar": measured["sar"],
+                "achieved_sdr_permuted": measured_perm["sdr"],
+                "permutation_flipped": bool(abs(measured_perm["sdr"] - measured["sdr"]) > 1e-6),
                 "clamped_to_baseline_floor": bool(alpha >= 1.0 - 1e-9),
+                "attainable": bool(hit["attainable"]),
+                "n_roots": int(hit["n_roots"]),
+                "alpha_rule": ALPHA_RULE,
+                "curve_monotone": bool(curve_info["monotone_decreasing"]),
+                "curve_max_reversal_db": float(curve_info["max_reversal_db"]),
+                "curve_sdr_min": float(curve_info["sdr_min"]),
             })
     return rows
 

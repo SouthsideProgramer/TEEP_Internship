@@ -144,3 +144,47 @@ class TestFindAlphasForTargetSdrsBatched:
         result = find_alphas_for_target_sdrs(heart_ref, lung_ref, heart_est, lung_est, targets, source="heart")
         assert set(result.keys()) == set(targets)
         assert all(0.0 <= a <= 1.0 for a in result.values())
+
+
+class TestGridFinder:
+    """find_alphas_for_target_sdrs_grid (2026-09-13): exact SDR(alpha) and the
+    pre-stated smallest-root rule."""
+
+    def test_closed_form_matches_direct_evaluation(self, real_audio):
+        import numpy as np
+        from degradation import sdr_curve_closed_form
+        from metrics import evaluate_heart_lung
+
+        heart_ref, lung_ref, heart_est, lung_est = real_audio
+        refs = np.stack([heart_ref, lung_ref])
+        for alpha in (0.05, 0.3, 0.7, 1.0):
+            closed = sdr_curve_closed_form(refs, heart_ref, heart_est, 0, np.array([alpha]))[0]
+            d = (1 - alpha) * heart_ref + alpha * heart_est
+            direct = evaluate_heart_lung(heart_ref, lung_ref, d, lung_est)["heart"]["sdr"]
+            assert abs(closed - direct) < 1e-4, (alpha, closed, direct)
+
+    def test_grid_finder_hits_targets_and_flags_unattainable(self, real_audio):
+        from degradation import degrade_row, find_alphas_for_target_sdrs_grid
+
+        heart_ref, lung_ref, heart_est, lung_est = real_audio
+        real = degrade_row(heart_ref, lung_ref, heart_est, lung_est, 1.0, "heart")["heart"]["sdr"]
+        targets = [real + 5.0, real + 15.0, real - 100.0, 1000.0]
+        found = find_alphas_for_target_sdrs_grid(heart_ref, lung_ref, heart_est, lung_est, targets, source="heart")
+        assert found["_curve"]["monotone_decreasing"] in (True, False)
+        for t in targets[:2]:
+            hit = found[float(t)]
+            assert hit["attainable"] and 0.0 < hit["alpha"] < 1.0
+            got = degrade_row(heart_ref, lung_ref, heart_est, lung_est, hit["alpha"], "heart")["heart"]["sdr"]
+            assert abs(got - t) < 0.1, (t, got)
+        assert not found[float(targets[2])]["attainable"]
+        assert not found[1000.0]["attainable"]
+
+    def test_smallest_root_rule_on_a_synthetic_dip(self):
+        import numpy as np
+        from degradation import grid_roots
+
+        alphas = np.linspace(0, 1, 11)
+        sdr = np.array([30, 20, 10, 0, -10, -5, 0, 5, 10, 12, 12], dtype=float)  # dips then recovers
+        roots = grid_roots(alphas, sdr, 5.0)
+        assert len(roots) == 2
+        assert min(roots) < 0.3  # descending branch from the clean end
