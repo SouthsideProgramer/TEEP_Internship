@@ -1,0 +1,20 @@
+--- a/spike/circor.py	2026-09-18 00:32:29.486780090 +0800
++++ b/spike/circor.py	2026-09-18 00:32:50.697048664 +0800
+@@ -4,6 +4,7 @@
+ Test-condition waveforms are cached in spike/out/circor_cache/ (resumable).
+ Writes spike/out/circor_summary.txt and circor_counts.csv.
+ """
++import os
+ from concurrent.futures import ProcessPoolExecutor
+ from pathlib import Path
+ 
+@@ -18,7 +19,8 @@
+ from load_dataset import load_audio, load_ls
+ from resnet_arch3 import BATCH, DEVICE, LR, make_resnet, windows
+ 
+-CIRCOR = Path("/home/satya/data/circor")
++# CirCor DigiScope 1.0.3 training set (PhysioNet); override with CIRCOR_DIR=... from a checkout on another machine.
++CIRCOR = Path(os.environ.get("CIRCOR_DIR", "/home/satya/data/circor"))
+ MAX_SECONDS = 30
+ TEST_FRAC, VAL_FRAC = 0.30, 0.15
+ SPLIT_SEED, VAL_SEED, LUNG_SEED = 2026, 2027, 2028
