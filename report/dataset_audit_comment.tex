@@ -1,0 +1,244 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\title{Comment on ``Descriptor: Heart and Lung Sounds Dataset Recorded from\\
+a Clinical Manikin using Digital Stethoscope (HLS-CMDS)''}
+\author{[Author Name] \\ TEEP Internship}
+\date{Draft -- 2026-08-26}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\fbox{\parbox{0.9\textwidth}{\small
+\textbf{Status: DRAFT, ready for review.} Both open items are now closed.
+Provenance: the copy audited here is byte-identical to the Mendeley release
+--- all six top-level artifacts match on MD5, verified 2026-08-19 --- so the
+findings concern the released dataset rather than a redistribution. Sample
+rate: checked against the descriptor's own text (Table~I, p.~138, and the
+comparative claim on p.~134), which
+changed how Section~\ref{sec:samplerate} is phrased --- 22\,050~Hz is stated
+there as an instrument specification, and the descriptor never states the
+released files' rate at all.}}
+\end{center}
+
+\begin{abstract}
+While using the HLS-CMDS dataset \cite{hlscmds} to build an evaluation
+pipeline for heart/lung sound source separation, we ran independent
+integrity checks against the paired \texttt{Mix.csv} recordings that
+\texttt{Mix.csv} claims to be additive combinations of the isolated
+\texttt{HS.csv}/\texttt{LS.csv} recordings. Two independent methods --- a
+least-squares additivity fit and a clipping-artifact scan --- agree that
+only 36 of the 145 published mixture rows are acoustically consistent with
+their stated heart/lung sources; the remaining 109 are not. We also report a
+sample-rate gap: every released file measures 4{,}000~Hz, while the only
+sample rate the descriptor gives is 22{,}050~Hz, stated as a specification
+of the recording instrument; the section describing the released files does
+not state their rate at all. We report both findings here,
+separately from our own
+separation-methods work, because they bear on the validity of ground truth
+used by at least four published studies that build on this dataset, not
+just our own.
+\end{abstract}
+
+\section{Motivation for this comment}
+
+This comment is deliberately kept separate from our companion methods paper
+on leakage-safe heart/lung separation evaluation. That paper's contribution
+is a separation pipeline and baseline comparison; the findings below are
+about the integrity of the released dataset itself, and are relevant to
+every downstream user of HLS-CMDS, not only to our own results. We report
+them here, addressed to the descriptor's own venue, so they are discoverable
+by anyone consulting the dataset in the future.
+
+\section{Additive-triplet audit}
+\label{sec:additivity}
+
+HLS-CMDS's \texttt{Mix.csv} lists, for each of 145 mixture recordings, the
+isolated heart (\texttt{HS.csv}) and lung (\texttt{LS.csv}) recording IDs
+that were combined to produce it. We tested this claim directly: for each
+row, we fit the least-squares scalar gain $a$ minimizing
+$\lVert \text{mixed} - a\cdot(\text{heart}+\text{lung}) \rVert$, then
+computed the relative residual
+$\lVert \text{mixed} - a\cdot(\text{heart}+\text{lung}) \rVert / \lVert \text{mixed} \rVert$.
+A row is additive when this residual falls below $10^{-3}$.
+
+The result is sharply bimodal, not a continuum: genuinely additive rows land
+at relative residual $\sim 10^{-8}$--$10^{-4}$ (consistent with 16-bit
+quantization noise on an exact sum), while the remaining rows land at
+relative residual $\sim 1$ --- i.e., the mixed recording shares essentially
+no structure with its named heart/lung sources. Only \textbf{36 of 145 rows}
+(\texttt{M0087}, \texttt{M0111}--\texttt{M0145}) pass; the other 109 fail by
+a wide margin, not a borderline one.
+
+This check is implemented as \texttt{verify\_additive\_triplets()} in our
+public repository (Section~\ref{sec:availability}) so it is independently
+re-runnable against any copy of the dataset, rather than resting on a
+one-off finding.
+
+\section{Independent corroboration: a clipping fingerprint}
+\label{sec:clipping}
+
+A separate, unrelated audio-quality scan --- flagging the fraction of
+samples pinned at the 16-bit full-scale rail ($\pm 32767$) in every
+\texttt{.wav} file referenced by \texttt{HS.csv}/\texttt{LS.csv}/\texttt{Mix.csv}
+--- turned up a single-sample clipping artifact in exactly one subset of
+\texttt{Mix.csv}: \texttt{M0111}--\texttt{M0145} plus \texttt{M0087}. This is
+the identical 36-row set identified by the additivity test in
+Section~\ref{sec:additivity}, found independently, by a method with no
+knowledge of the additivity result.
+
+The mechanism is explicable and not an artifact of file corruption: it is
+the fingerprint of peak normalization applied \emph{after} summing the
+heart and lung signals, with a measured gain range of roughly
+$3.5\times$--$135\times$ across these 36 rows (not integer overflow, which
+was our original hypothesis before checking the gain magnitudes directly).
+That two independent checks --- one purely numerical, one a physical
+artifact of the recording pipeline --- converge on the same 36 IDs is, in
+our view, strong evidence that this is a genuine property of the released
+files rather than a bug in either check.
+
+\section{Sample-rate discrepancy}
+\label{sec:samplerate}
+
+Every one of the 535 released files measures 4{,}000~Hz --- mono, 16-bit,
+15.0~s (60{,}000 frames) --- without exception. The descriptor gives one
+sample-rate figure, and it is $5.5\times$ higher: Table~I on page~138,
+\emph{Technical Specification of the Digital Stethoscope}, lists
+``Recording Sample Rate: 22\,050~Hz''.
+
+We want to be precise about what that does and does not assert, because the
+distinction changes what we are asking for. Table~I specifies the
+\emph{instrument}, not the distributed files. The section that does describe
+the distributed files --- \emph{Records and Storage} --- states their count,
+format, grouping and metadata, but never their sample rate. The only other
+passage that touches the rate is comparative: on page~134, immediately after
+noting that the earlier manikin dataset of Tsai et al.\ was recorded ``at
+8~kHz sampling rate'', the descriptor states that its own digital
+stethoscope provides ``improved recording quality, a higher sampling rate,
+and better resolution''. The released files, at 4{,}000~Hz, are below that
+8~kHz reference, so this is the one sentence in the descriptor that the
+release contradicts outright. Everything else is consistent with the files
+having been captured at 22\,050~Hz and downsampled afterwards, undocumented.
+
+What the descriptor leaves a reader with, then, is one explicit sample-rate
+number and one comparative claim, and no way to learn that the files carry a
+rate that satisfies neither. The recording path the
+descriptor itself describes --- stethoscope, then Bluetooth to the Eko
+mobile application, then that vendor's cloud platform, then download as
+\texttt{.wav} --- has several points at which a resampling could occur, and
+none of them is documented. A reader who takes 22\,050~Hz as the data rate,
+which is the only inference the paper supports, will be wrong by a factor of
+$5.5$.
+
+We note explicitly that this is a property of the release and not of a
+redistribution, because our own first reading of it was the opposite. The
+copy we initially audited was obtained from
+\url{github.com/Torabiy/HLS-CMDS}, which left open the likelier-seeming
+explanation that we had measured a downsampled convenience mirror. We tested
+that by re-downloading the dataset from Mendeley
+(\url{https://data.mendeley.com/datasets/8972jxbpmp/3}, v3, retrieved
+2026-08-19) and checksumming it independently: all six top-level artifacts
+(\texttt{HS}, \texttt{LS} and \texttt{Mix}, each as \texttt{.csv} and
+\texttt{.zip}) are byte-identical between the two copies. The mirror is
+faithful; the discrepancy is in the release.
+
+We therefore recommend the narrower fix that this finding actually supports:
+that \emph{Records and Storage} state the released files' own sample rate
+explicitly, and that whatever processing sits between capture at 22\,050~Hz
+and release at 4\,000~Hz be described, or the files re-issued at the capture
+rate if the downsampling was not intended.
+
+The discrepancy is unlikely to have invalidated published results built on
+this dataset --- cardiac energy below 200~Hz and respiratory energy below
+1~kHz both sit comfortably under a 2~kHz Nyquist, so the retained band is
+adequate for the analyses these papers perform. It does affect tooling and
+reproduction: pretrained separation and classification models expecting
+8--16~kHz input cannot be applied to these files without resampling, a
+reader sizing an STFT or a filter bank from 22\,050~Hz will get every
+frequency bin wrong, and anyone reproducing a published pipeline needs to
+know which rate its author actually worked at.
+
+\section{Downstream impact}
+\label{sec:impact}
+
+We are aware of four published studies that build on HLS-CMDS
+\cite{aidriven,spectrotemporal,nmfcrnn,edgelung}. Two of them
+\cite{spectrotemporal,edgelung} run their separation method directly on
+\texttt{Mix.csv}'s paired mixed recordings and use the listed heart/lung IDs
+as ground truth; neither reports having verified that the mixed recording
+is actually an additive combination of those sources. If either study's
+evaluation set includes rows outside the 36 we identify as additive, their
+reported separation behavior on those rows was measured against a ground
+truth that does not describe the mixed signal they were separating. A third
+study \cite{nmfcrnn} uses only the isolated \texttt{HS.csv}/\texttt{LS.csv}
+recordings as an auxiliary dictionary-learning corpus, not \texttt{Mix.csv}
+directly, and so is exposed to the sample-rate question
+(Section~\ref{sec:samplerate}) but not to the additivity finding. None of
+the four papers reports an independent integrity check of the kind
+described here.
+
+We raise this not to characterize any of these results as incorrect, but
+because none of the four papers had the means to know whether it applied --
+the additivity gap is not visible from the CSV metadata or from listening
+to a handful of files; it required a systematic per-row check.
+
+\section{Recommendation}
+
+We suggest the descriptor be amended, or an erratum issued, to note: (1)
+that only 36 of 145 \texttt{Mix.csv} rows are additive combinations of their
+listed sources, with row IDs enumerated above, so that downstream users can
+restrict evaluation to the valid subset or account for the rest; and (2)
+the sample-rate finding of Section~\ref{sec:samplerate} once resolved. We
+would welcome the opportunity to share our audit code directly with the
+authors if useful for reproducing or disputing this finding.
+
+\section{Data and code availability}
+\label{sec:availability}
+
+The additivity check (\texttt{verify\_additive\_triplets()}) and the
+clipping-based audio-quality scan referenced above are both part of the
+public pipeline accompanying our companion methods paper, and are
+independently re-runnable against any copy of HLS-CMDS.
+
+\begin{thebibliography}{9}
+
+\bibitem{hlscmds}
+Y.~Torabi, S.~Shirani, and J.~P.~Reilly, ``Descriptor: Heart and Lung Sounds
+Dataset Recorded from a Clinical Manikin using Digital Stethoscope
+(HLS-CMDS),'' \textit{IEEE Data Descriptions}, vol.~2, pp.~133--140, 2025.
+doi:10.1109/IEEEDATA.2025.3566012.
+
+\bibitem{aidriven}
+Y.~Torabi, ``AI-Driven Cardiorespiratory Signal Processing: Separation,
+Clustering, and Anomaly Detection,'' Ph.D.\ dissertation, McMaster
+University, 2025.
+
+\bibitem{spectrotemporal}
+A.~Yaqub, M.~S.~Orakzai, M.~F.~Qureshi, Z.~Mushtaq, I.~Siddique, and
+T.~Radwan, ``Spectrotemporal Deep Learning for Heart Sound Classification
+under Clinical Noise Conditions,'' \textit{Computer Modeling in
+Engineering \& Sciences}, vol.~145, no.~2, pp.~2503--2529, 2025.
+doi:10.32604/cmes.2025.071571.
+
+\bibitem{nmfcrnn}
+B.~Han, W.~Quan, B.~Matuszewski, and D.~Corbett, ``Respiratory Disease
+Classification Using NMF-Enhanced Log-Mel Spectrograms and Convolutional
+Recurrent Neural Networks,'' \textit{Sensors}, vol.~26, no.~13, art.~4268,
+2026. doi:10.3390/s26134268.
+
+\bibitem{edgelung}
+A.~Puneet, P.~Shankar, S.~R.~R.~Koluguri, and A.~Srivastava,
+``Edge-Enabled Portable Classifier for Lung Sounds Using Convolutional
+Neural Networks,'' in \textit{Proc.\ 2025 IEEE Biomedical Circuits and
+Systems Conference (BioCAS)}, pp.~21--25, 2025.
+doi:10.1109/BioCAS67066.2025.00016.
+
+\end{thebibliography}
+
+\end{document}

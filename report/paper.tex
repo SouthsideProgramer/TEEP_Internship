@@ -1,0 +1,613 @@
+\documentclass[journal]{IEEEtran}
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue]{hyperref}
+
+\newcommand{\FitTable}[1]{\begingroup\sbox0{#1}\ifdim\wd0>\linewidth\resizebox{\linewidth}{!}{\usebox0}\else\usebox0\fi\endgroup}
+\newcommand{\PaperFigure}[1]{\IfFileExists{#1}{\includegraphics[width=\linewidth]{#1}}{\fbox{\parbox[c][3.5cm][c]{0.92\linewidth}{\centering\color{red}\textbf{Figure file required}\\[0.5em]\normalfont\footnotesize\path{#1}}}}}
+
+\begin{document}
+
+\title{Evaluating Separation Quality and Downstream Classification in Cardiorespiratory Audio}
+
+\author{[Author Name]\\ \small [Affiliation]}
+
+\maketitle
+
+\begin{abstract}
+Cardiorespiratory source-separation studies often assess separation quality and downstream classification separately, leaving their relationship unclear. We address this gap by interpolating between each separator's output and its matched ground-truth reference, then evaluating classification at attainable target signal-to-distortion ratios (SDRs) with classifier weights held fixed. The study combines a leakage-safe benchmark of six separators with a downstream analysis of validated native HLS-CMDS mixtures under two classifier architectures. Better separation SDR does not consistently correspond to better classification, and the existence and location of crossings of the raw-mixture accuracy reference depend on both the separator and classifier. Bootstrap analyses reveal substantial uncertainty in these protocol-specific crossings. The resulting trajectories describe accuracy along specified signal transformations; they do not identify SDR as the sole cause of downstream performance. SDR is an aggregate quality measure that does not uniquely specify the distortions a classifier encounters. These findings motivate joint evaluation of separation and classification, without establishing a universal SDR threshold or a uniform benefit or cost of separation.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Source separation, heart sound classification, lung sound separation, data leakage, cross-validation, BSS Eval, HLS-CMDS, cardiorespiratory signal processing.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Bedside auscultation always produces a mixed heart-and-lung recording; a clinical stethoscope cannot isolate one source from the other. The standard remedy is to separate computationally, then classify the separated estimate as if it were clean. Whether that remedy is safe is an empirical question with two halves --- how good is the separation, and does that level of separation quality preserve classification accuracy --- and the literature answers each half in isolation, never both at once, on the one dataset built specifically to allow both to be measured together.
+
+HLS-CMDS \cite{torabi_descriptor} is that dataset: the first to offer matched isolated and mixed cardiorespiratory recordings from the same underlying sources, with every mixed file nominally paired to a named heart and lung source file. The prior evaluations discussed below motivate joint measurement of separation quality and classification performance.
+
+Torabi et al.\ \cite{torabi_diss} report separation quality on this dataset with SDR figures as high as 26.8~dB, but at no point run a downstream classifier on the separated output, so their number says nothing about whether that quality is sufficient for any practical use. Yaqub et al.\ \cite{yaqub2025} run the classifier and find the opposite kind of gap: a ResNet-18 PCG classifier retrained on HLS-CMDS reaches 89.0\% accuracy on clean isolated recordings but collapses to 41.0\% when the same classifier is applied to heart sounds separated from the dataset's mixtures with a standard bandpass filter --- a striking result reported with no SDR attached to either endpoint, so the collapse can be observed but not explained. Puneet et al.\ \cite{puneet2025} and Han et al.\ \cite{han2026} both apply separation on or around HLS-CMDS as a preprocessing step for their own downstream task and report no separation-quality metric at all for that step, even though this is the one dataset published specifically to make such a metric computable. The gap is not merely an omission of convenience: Han et al.\ \cite{han2026}, Figure~3, place the mixture, the ground-truth respiratory signal, and their own extracted signal side by side and assess the match in prose. Although a matched reference was shown qualitatively, the study did not report a quantitative separation metric.
+
+One group is the exception. Han and Quan \cite{han_quan_ssa} publish SDR, STOI, and correlation for a two-stage Singular Spectrum Analysis (SSA) method against Butterworth filtering, NMF, NMF+autoencoder, and HPSS, the only prior separation-quality numbers on material drawn from this literature that this evaluation can sanity-check against. But they do not evaluate on HLS-CMDS's native mixture rows: they take 10 isolated cardiac and 5 isolated respiratory recordings, combine them into 50 synthetic mixtures of their own construction, and add Gaussian noise at 2\% RMS. Section~\ref{sec:methodology} distinguishes a larger synthetic separation benchmark from an exploratory classification analysis restricted to native rows that pass the additive-pair check.
+
+Prior work has tended to report separation quality and downstream performance separately, while some application-oriented studies report neither quantity explicitly. Joining the first two --- turning Yaqub et al.'s two-point collapse into a continuous curve against Torabi et al.'s kind of number, to characterize how separation quality and classifier performance interact --- is the contribution this paper makes, with the present native-subset curves relying on the 36 rows that pass the additive-pair audit.
+
+This paper's contributions are organized as follows. The headline contribution (\textbf{C2}) is a controlled interpolation between a separation method's real output and ground truth, yielding accuracy--SDR curves on 36 native additive rows under two architecturally distinct, level-normalised classifiers, with $\alpha$ solved analytically rather than by bisection. The analysis reports crossings of the raw-mixture accuracy reference and their dependence on classifier architecture, together with bootstrap uncertainty for every crossing, rather than assuming a universal threshold. The supporting contribution (\textbf{C1}) is a six-method benchmark reporting SDR/SIR/SAR on the native subset and SDR on a larger synthetic substrate under leakage-safe evaluation, generated from a single canonical row-level results file so that every downstream table and figure is traceable to the same cached separated audio. The synthetic substrate is the primary separation-quality benchmark; the 36-row native-additive subset is the primary substrate for the downstream classification and knee analysis, and the two are not pooled. A pairing audit, checked for sensitivity against seven alternative alignment and scaling models, motivates the exclusion of non-additive native rows. An additional analysis reports MACs and measured idle-machine latency for all six baselines on an SDR-versus-compute Pareto plane.
+
+\section{Related Work}
+
+Six prior works bear directly on this evaluation (Table~\ref{pi:related}). Yaqub et al.\ \cite{yaqub2025} is the motivating result described above: a stress test with no separation-quality metric attached to either endpoint. Han and Quan \cite{han_quan_ssa} report a two-stage SSA separator with proper SDR/SIR/SAR-family metrics against five baselines (Table~\ref{tab:hanquan}), but no downstream classification task and no evaluation on HLS-CMDS's own native pairs. Puneet et al.\ \cite{puneet2025} propose an EVMD-based lung-isolation stage evaluated directly on HLS-CMDS mixtures for an FPGA-deployed classifier, but report no separation-quality metric at all. Han et al.\ \cite{han2026} classify respiratory disease using NMF-enhanced log-Mel spectrograms on a different dataset (ICBHI 2017 and Fraiwan), with no separation metric, and their own authors note a recording-level split as a limitation. Vincent et al.\ \cite{vincent2006} define the BSS Eval SDR/SIR/SAR decomposition this work uses throughout and note that SAR is sensitive to distortion a downstream classifier may never register, motivating this paper's choice to report all three metrics rather than SDR alone. Torabi \cite{torabi_diss} reports an LLM-guided NMF separator on HLS-CMDS evaluated by clustering and anomaly detection rather than classification accuracy.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Published reference points from Han and Quan \cite{han_quan_ssa}, Table~I: 50 synthetic mixtures (10 cardiac + 5 respiratory recordings, 2\% RMS Gaussian noise), no confidence intervals reported. C = cardiac, R = respiratory.}
+\label{tab:hanquan}
+\FitTable{\begin{tabular}{lcccc}
+\toprule
+Method & SDR C & SDR R & Corr C & Corr R \\
+ & (dB) & (dB) & (\%) & (\%) \\
+\midrule
+MSSA (proposal) & 26.4 & 5.3 & 99.2 & 80.5 \\
+First-stage SSA only & 26.4 & 4.6 & 99.2 & 77.2 \\
+Butterworth filter & 5.7 & $-5.7$ & 91.4 & 29.7 \\
+NMF + autoencoder & 4.5 & $-17.3$ & 90.7 & 31.2 \\
+HPSS & 2.5 & $-22.0$ & 60.6 & 10.1 \\
+NMF & 1.0 & $-2.3$ & 50.0 & 10.2 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+No work reviewed combines separation-quality reporting, isolated-vs-separated classification comparison, and a leakage-verified split on this dataset. These numbers in Table~\ref{tab:hanquan} are not adopted as a target and are not merged into this paper's own result tables: they were computed on a different construction (10+5 source recordings, $n=50$, one fixed 2\% RMS noise level, no confidence intervals), and Torabi et al.'s 26.8~dB figure is a third construction again. They are used only as a sanity check that this evaluation's own zero-training baseline lands in a comparable range rather than an implausible one.
+
+
+\begin{table*}[t]
+\centering
+\caption{Related work on HLS-CMDS and on cardiorespiratory separation, by what each study measures. ``---'' = not reported in the cited paper; ``n.s.'' = not stated. Entries were checked against the cited papers' own text.}
+\label{pi:related}
+\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{3.6cm}p{2.6cm}p{1.9cm}p{2.9cm}p{3.3cm}p{2.2cm}@{}}
+\toprule
+Study & Dataset & Mixtures & Separation metric & Downstream task & Leakage-safe split \\
+\midrule
+Torabi et al.\ \cite{torabi_descriptor} (descriptor) & HLS-CMDS & native & --- (source) & --- & --- \\
+Torabi \cite{torabi_diss} & HLS-CMDS & native & SDR reported (up to 26.8\,dB, as cited in Sec.~II) & clustering / anomaly detection, not accuracy & n.s. \\
+Yaqub et al.\ \cite{yaqub2025} & PhysioNet 2016 + HLS-CMDS (external validation) & native & --- & 4-class PCG classification; $89.0\%\to41.0\%$ clean vs.\ bandpass-separated & n.s. \\
+Han and Quan \cite{han_quan_ssa} & n.s. & synthetic (10 cardiac $\times$ 5 respiratory) & SDR, STOI, correlation vs.\ five baselines & --- & n/a (no learning) \\
+Puneet et al.\ \cite{puneet2025} & HLS-CMDS & native & --- & lung-sound classification, FPGA & n.s. \\
+Han et al.\ \cite{han2026} & ICBHI 2017 + Fraiwan & n.s. & --- (qualitative figure) & respiratory-disease classification & recording-level split, noted by the authors \\
+This study & HLS-CMDS + synthetic & native (36 audited) and synthetic (1500) & SDR/SIR/SAR, both substrates & 4-class heart classification, two architectures, isolated vs.\ separated vs.\ raw & leak-group folds \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Dataset and the Case for a Synthetic Substrate}
+
+HLS-CMDS \cite{torabi_descriptor} ships three manifests: HS.csv (50 isolated heart recordings, ten classes), LS.csv (50 isolated lung recordings, six classes), and Mix.csv (145 mixed recordings, each naming the heart and lung recording used to build it). All 535 referenced files are 4000~Hz, mono, 16-bit, exactly 15.0~s (60{,}000 samples), read directly from the file headers of every file. The dataset descriptor's summary table states a recording sample rate of 22{,}050~Hz \cite{torabi_descriptor}; a byte-level MD5 check against a fresh Mendeley release download confirms this working copy is identical to the canonical release, so the $5.5\times$ discrepancy belongs to the release or its documentation, not to this copy. Every step of this study uses the files' actual 4000~Hz rate (Nyquist 2000~Hz, above the 20--1000~Hz bands of interest) and no resampling; prior work on HLS-CMDS does not state which rate it used.
+
+A mixture row's three named files existing and being uniquely paired does not establish that the mixture is acoustically related to those sources. For each row we fit the least-squares gain $a$ minimizing $\lVert \text{mixed} - a(\text{heart}+\text{lung}) \rVert^2$ and compute the relative residual. This measure is empirically bimodal with a wide gap: genuinely additive rows land at residual $\sim 10^{-8}$--$10^{-4}$ (limited by 16-bit quantization), acoustically unrelated rows at residual $\sim 1$, with no row in between.
+
+Table~\ref{pi:additive} summarizes the additive-triplet audit.
+\begin{table}[t]
+\centering
+\caption{Additive-triplet audit of \texttt{Mix.csv} (HLS-CMDS, Mendeley v3; byte-identical to the release). A row is additive when $\|m-a(h+l)\|/\|m\|<10^{-3}$ for the least-squares gain $a$. The reported residuals form two separated ranges ($\sim10^{-8}$--$10^{-4}$ versus $\sim1$).}
+\label{pi:additive}
+\footnotesize
+\FitTable{\begin{tabular}{@{}lcc@{}}
+\toprule
+ & Rows & \% of 145 \\
+\midrule
+Additive, $m\approx a(h+l)$ & 36 & 24.8 \\
+Not additive with named sources & 109 & 75.2 \\
+\midrule
+Total & 145 & 100 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{Sensitivity of the additive verdict}
+The one-gain, zero-lag fit above was relaxed in seven ways: with the per-row mean removed before fitting; with the gain allowed to be negative; with the summed reference shifted by the cross-correlation-optimal integer lag within $\pm100$ samples; with separate gains for the heart and lung components; with separate gains and separate per-source lags; and the corresponding combinations of these relaxations. Every one of the seven models selects the same 36 rows at the $10^{-3}$ residual threshold. The passing cluster's residuals span $0.9$--$4.5\times10^{-4}$ and the failing cluster's $0.94$--$1.0$ under the loosest tested model, a separation of more than three orders of magnitude; thresholds of $10^{-2}$ and $10^{-3}$ select the same 36 rows, while a stricter $10^{-4}$ threshold admits only 3, consistent with 16-bit quantization alone imposing a residual floor near $10^{-4}$ on a genuinely additive row. The optimal lag is 0 for all 36 passing rows and spreads to the $\pm100$-sample search edge for the 109 failing rows, the pattern expected when cross-correlating acoustically unrelated signals. Thus the exclusion of the 109 rows is robust to the tested gain, offset, and alignment relaxations: their mixture has negligible measurable correspondence with the two recordings named alongside it under the tested models.
+
+A second, independent problem affects whichever valid rows are used as ground truth: content hashing shows a substantial fraction of the distinct heart and lung recordings drawn on by \texttt{Mix.csv} are byte-identical to a recording also listed standalone in \texttt{HS.csv}/\texttt{LS.csv} --- the exact pool a separation dictionary would otherwise be fit on. Because reuse links mixture rows both directly and transitively, the leakage-safe unit is a connected component (``leak group''), not a row.
+
+The reported reuse distribution and fold sizes are listed in Table~\ref{pi:split}.
+\begin{table}[t]
+\centering
+\caption{Recording reuse and the leakage-safe split. Top: leak-group sizes over the 145 mixture rows (29 groups, sizes summing to 145; a group is a connected component of rows sharing a heart or lung recording by content hash). Bottom: the 5-fold split (seed 0), greedy largest-group-to-smallest-fold, and the isolated-recording pool left for dictionary/model fitting once every recording reused in the held-out fold is removed.}
+\label{pi:split}
+\footnotesize
+\FitTable{\begin{tabular}{@{}lcccccccccc@{}}
+\toprule
+Group size & 32 & 22 & 19 & 13 & 11 & 9 & 4 & 3 & 2 & 1 \\
+\# groups & 1 & 1 & 1 & 1 & 1 & 1 & 2 & 3 & 4 & 14 \\
+\bottomrule
+\end{tabular}}
+
+\vspace{0.6em}
+\FitTable{\begin{tabular}{@{}lccc@{}}
+\toprule
+Fold & Eval rows /145 & HS pool /50 & LS pool /50 \\
+\midrule
+0 & 32 & 44 & 46 \\
+1 & 29 & 43 & 46 \\
+2 & 28 & 44 & 47 \\
+3 & 28 & 40 & 43 \\
+4 & 28 & 47 & 38 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+The 36 native additive rows support the exploratory accuracy--SDR sweep reported here, but provide limited statistical resolution. To broaden the separation benchmark, we also build a synthetic set. Full combinatorial pairing would connect all sources under a reuse-based split, so heart and lung files are assigned independently to folds; a pair is evaluated under fold $k$ only when both sources belong to fold $k$. The resulting benchmark comprises 500 heart/lung pairs at three noise levels, for 1500 mixtures (Table~\ref{pi:substrates}). The synthetic separation benchmark is the primary substrate for separation-quality comparison at scale; the native additive subset remains the only substrate on which downstream classification and the accuracy--SDR sweep are evaluated, since only it has a real classifier-relevant reference recording per source. The two substrates are distinct experiments and are not pooled.
+
+\subsection{Separation-Quality Metrics}
+
+Separation quality is scored with the BSS Eval decomposition \cite{vincent2006}: an estimated source is decomposed into a target component, an interference component, and an artifacts component, giving SDR, SIR, and SAR in dB. All three are reported rather than SDR alone, since a method can trade SIR for SAR without changing SDR appreciably while changing what a downstream classifier actually sees. The metrics wrapper is validated against \texttt{mir\_eval} \cite{raffel2014} directly and against closed-form synthetic constructions with known theoretical SDR/SIR/SAR.
+
+Table~\ref{pi:metricsval} reports the supplied wrapper-validation outcomes.
+\begin{table}[t]
+\centering
+\caption{Validation of the BSS Eval wrapper against synthetic constructions (\texttt{test\_metrics.py}). $s$ denotes the reference, $n$ white noise, and $\alpha s_k$ leakage from the other source.}
+\label{pi:metricsval}
+\footnotesize
+\FitTable{\begin{tabular}{@{}llcc@{}}
+\toprule
+Construction & Target (dB) & Tol. & Measured \\
+\midrule
+$\hat s=s$ & all three $\to\infty$ & $>100$\,dB & $>300$\,dB \\
+$\hat s=s+n$, SNR 20\,dB & SDR $\approx$ SAR $\approx20$ & $\pm1$\,dB & pass \\
+$\hat s=s+n$, SNR 6\,dB & SDR $\approx$ SAR $\approx6$ & $\pm1$\,dB & pass \\
+$\hat s_j=s_j+0.1s_k$ & SIR $=20$ & $\pm1$\,dB & pass \\
+$\hat s_j=s_j+0.3s_k$ & SIR $=10.46$ & $\pm1$\,dB & pass \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Separation Baselines and the Canonical Result File}
+
+Six baselines are evaluated end-to-end through a common five-fold harness that supplies each fold's leakage-restricted dictionary pool. \textbf{B1 (bandpass)} applies a 4th-order zero-phase Butterworth filter (heart 20--200~Hz, lung 150--1000~Hz) derived from this dataset's own Welch-PSD survey; zero-training, the sanity floor. \textbf{B2 (supervised NMF)} reproduces a published KL-divergence multiplicative-update recipe \cite{han2026}: fixed per-source dictionaries learned once per fold, frozen, with activations re-solved per mixture and applied as a Wiener-style mask. \textbf{B3 (standard NMF)} removes the pretrained dictionary, factorizing both $W$ and $H$ fresh from each mixture, isolating how much of B2's behavior is attributable to its learned dictionary. \textbf{B4 (MSSA)} reproduces a two-stage SSA method \cite{han_quan_ssa} with all hyperparameters taken as stated; zero-training. \textbf{B5 (EVMD)} reproduces an Enhanced Variational Mode Decomposition lung-isolation stage \cite{puneet2025}, implemented from scratch. \textbf{B6 (Conv-TasNet-lite)} is a sized-down Conv-TasNet \cite{luo2019} trained from scratch at 4000~Hz per fold, the first neural end-to-end baseline in this evaluation. Table~\ref{pi:basecfg} lists every configuration value as run.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The six separation baselines.}
+\label{tab:baselines}
+\FitTable{\begin{tabular}{llll}
+\toprule
+Baseline & Family & Training & Leakage exp. \\
+\midrule
+B1 & Bandpass filter & None & None \\
+B2 & Supervised NMF & Fixed dict./fold & Dict.\ pool \\
+B3 & Standard NMF & Per-mixture & None \\
+B4 & MSSA & None & None \\
+B5 & EVMD & None & None \\
+B6 & Conv-TasNet-lite & End-to-end/fold & Training pool \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\caption{Baseline configuration as run. All baselines operate at the files' 4000\,Hz with no resampling; all fitting uses the fold's leakage-restricted pool; seed 0 throughout; no per-baseline hyperparameter tuning on this dataset was performed --- published values were used as stated, and the two corrections to B2 came from re-reading its source, not from search.}
+\label{pi:basecfg}
+\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lp{15.2cm}@{}}
+\toprule
+B1 bandpass & 4th-order Butterworth, SOS, zero-phase (\texttt{sosfiltfilt}); heart 20--200\,Hz, lung 150--1000\,Hz; no parameters. \\
+B2 supervised NMF & Pre-denoise 4th-order zero-phase bandpass 50--1800\,Hz; STFT $n_{\rm fft}{=}512$, hop 256, Hann; magnitude spectrogram; KL-divergence multiplicative updates; dictionaries $K_i{=}10$ (heart), $K_r{=}20$ (lung) fitted for 100 iterations on the concatenated isolated recordings of the fold's pool, then frozen; 60 iterations for per-mixture activations with $W$ fixed; uniform random init ($W$, $H$) with $\epsilon{=}10^{-12}$ floor, $H$ floor $10^{-3}$ when $W$ is fixed; fixed iteration counts (no convergence stopping); soft mask $W_iH_i/(W_iH_i+W_rH_r)$ on the mixture's complex STFT, inverse STFT; source assignment fixed by dictionary identity. \\
+B3 standard NMF & Same STFT, pre-denoise, updates and $\epsilon$ as B2; $W$ and $H$ both fitted per mixture from uniform random init, $K{=}30$, 160 iterations; the 10 components with the lowest spectral centroid are assigned to heart and the other 20 to lung, then masked and inverted as in B2. \\
+B4 MSSA & Two-stage SSA, window $L{=}50$, diagonal averaging. Stage 1: reconstructed components whose spectral peak is $\leq 250$\,Hz are summed as heart. Stage 2 on the residual: components contributing $\geq 2\%$ ($100/L$) of eigenvalue variance are kept, plus any other component correlating $>0.50$ with their sum; their sum is lung. No training. \\
+B5 EVMD & VMD with $\alpha{=}2000$, ADMM tolerance $10^{-6}$, at most 100 iterations; $K$ swept over $2$--$10$ and the first $K$ accepted whose modes all pass the published normalised-permutation-entropy criteria ($\mu_1{=}0.01$, $\mu_2{=}0.4$, $\mu_3{=}0.3$, $\mu_4{=}0.05$; embedding dimension 5). Heart = the mode with the lowest spectral peak, zero-phase lowpassed at 150\,Hz; lung = mixture minus heart. No training. \\
+B6 Conv-TasNet-lite & Encoder $N{=}64$ filters, $L{=}20$ samples, stride 10; TCN $B{=}64$, $H{=}128$, $S_c{=}64$, $P{=}3$, $X{=}6$, $R{=}2$; two sources with fixed order (no PIT); gLN; 325{,}465 parameters. Training per fold from scratch: 4\,s random crops, batch 8, 40 steps/epoch, 25 epochs, Adam lr $10^{-3}$, weight decay $10^{-2}$, gradient clip 5, negative SI-SDR loss, lr halved after 4 epochs without validation improvement, early stop after 10; 20\% of the fold's pool (24 pairs) for validation; GPU, seed 0 but cuDNN non-deterministic (a repeat run differed by 0.13\,dB native heart SDR). \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+
+All native-subset separation-quality figures (Table~\ref{pi:native}), the downstream Condition-B evaluation (Table~\ref{pi:conditionB}), and the accuracy--SDR sweep (Figure~\ref{pi:kneefig}, Tables~\ref{pi:knee1}--\ref{pi:kneeboot}) are generated from a single canonical row-level result file recording, for every fold/method/source combination, the output waveform identifier, SDR/SIR/SAR, classifier predictions, target SDR, interpolation coefficient, and achieved SDR. Every table and figure below is computed from this one file rather than from independently recomputed summaries, so a separated waveform reported as having a given SDR is the exact audio the downstream classifiers consume.
+
+\subsection{Downstream Classifier and Class Grouping}
+
+HLS-CMDS labels each isolated heart recording with one of ten types, several with only 2--3 recordings --- too few to guarantee fold representation under a leak-group-respecting split. Using the same four class names as Yaqub et al.\ (Normal, Murmur, Extra Sound, Rhythm Disorder) provides a common task framing, although the sample sizes, classifiers, and evaluation protocols differ. \textbf{Architecture 1} is 13 MFCCs pooled to a mean/std feature vector, fed to a class-balanced RBF-kernel SVM. \textbf{Architecture 2}, built specifically to check whether any crossing is a property of separation quality or an artifact of one classifier, uses a log-Mel spectrogram fed to a small two-block CNN.
+
+Each fold's classifier is trained on the 40 \texttt{HS.csv} recordings not held out (50 in total, 10 per fold) with the same leak-group folds as the separation baselines; the held-out class counts per fold are Normal 2/2/2/2/1, Murmur 6/5/5/4/4, Extra Sound 1/1/1/2/2 and Rhythm Disorder 1/2/2/2/3, so no fold is balanced and two minority classes have a single held-out recording in some folds. The classification results are exploratory: 36 evaluation rows in 24 leak groups mean one changed prediction moves pooled accuracy by 2.8 points, and differences of that order between separators are not interpreted. Condition-A performance and class-specific recall are summarized in Table~\ref{pi:conditionA}.
+\begin{table}[t]
+\centering
+\caption{Condition A: isolated heart-sound classification on the 50 \texttt{HS.csv} recordings, four classes (Normal / Murmur / Extra Sound / Rhythm Disorder), same leak-group folds as the separation baselines, five-fold CV, mean $\pm$ 95\% CI over folds. Both classifiers use unit-RMS-normalised waveforms (see text). Recall is pooled over held-out predictions. The isolated row in Table~\ref{pi:conditionB} instead evaluates the 36 native-additive rows' own heart references: Architecture~1 scores 60.0\% here and 52.8\% there because the evaluation sets differ.}
+\label{pi:conditionA}
+\footnotesize
+\FitTable{\begin{tabular}{@{}lcc@{}}
+\toprule
+ & MFCC + SVM & log-Mel + CNN \\
+\midrule
+Accuracy & $60.0\pm10.7\%$ & $62.0\pm3.9\%$ \\
+Macro-F1 & $0.43\pm0.12$ & $0.54\pm0.11$ \\
+\midrule
+Recall: Normal ($n=9$) & 44\% & 67\% \\
+Recall: Murmur ($n=24$) & 92\% & 71\% \\
+Recall: Extra Sound ($n=7$) & 29\% & 71\% \\
+Recall: Rhythm Disorder ($n=10$) & 20\% & 30\% \\
+Main confusion & minority $\to$ Murmur & Rhythm D. $\to$ Normal \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\paragraph{Level normalisation}
+Both classifiers scale every waveform to unit RMS before feature extraction. This step was introduced after the initial Condition~B run returned identical predictions for three unrelated separators (bandpass, MSSA, and Conv-TasNet-lite). The isolated training recordings span 0.0005--0.013 RMS, whereas separated outputs inherit the mixture's peak-normalising gain and span 0.03--0.09 RMS; the diagnostic reports a typical level mismatch of $20$--$25\times$. Because MFCC$_0$ encodes log-energy, the initial separated inputs were at standardised distances of 11--15 from the training cloud, whose farthest point was at 7.4. At these distances, the reported RBF-kernel responses were approximately zero for every support vector, leaving a nearly constant per-fold decision function.
+
+Unit-RMS normalisation removes this global-level mismatch. The normalised separated inputs still lie outside the training cloud (distances 8--13), with the remaining discrepancy concentrated in spectral-shape coefficients MFCC$_1$--MFCC$_4$. These diagnostics motivate distinguishing level mismatch from residual separation-related feature shifts; they do not establish that every remaining shift has a single cause. All Condition-A, Condition-B, and crossing results reported here use the level-normalised classifiers.
+
+\subsection{Degradation Scheme and Closed-Form Crossing Estimation}
+
+For a separator's real output $s$ and ground truth $g$, the interpolated signal is
+\begin{equation}
+    d(\alpha)=(1-\alpha)g+\alpha s,\qquad 0\leq\alpha\leq1,
+    \label{eq:degradation}
+\end{equation}
+so $\alpha=0$ reproduces ground truth and $\alpha=1$ the real separated output. Because $d(\alpha)$ is affine in $\alpha$, the BSS Eval numerator and denominator entering the SDR are quadratic functions of $\alpha$, so
+\[
+\mathrm{SDR}(\alpha) = 10\log_{10}\frac{N(\alpha)}{D(\alpha)}
+\]
+with $N,D$ quadratic in $\alpha$. Each target-SDR equation is therefore solved analytically via the roots of a quadratic, rather than by bisection. The closed-form solution was cross-checked against \texttt{mir\_eval} at five interior points on 72 trajectories, agreeing within $10^{-5}$\,dB. Attainability and monotonicity were audited on a 1001-point grid over $[0,1]$ for all 432 method--row--source trajectories: 425 were monotone non-increasing in $\alpha$, and the remaining seven --- all Conv-TasNet-lite heart estimates --- exhibited a cancellation dip, with minima between $-6$ and $-20$\,dB at $\alpha\approx0.04$--$0.17$. These seven trajectories were retained rather than discarded, using a smallest-root rule fixed before the rerun: when a target SDR has multiple roots in $[0,1]$, the root nearest $\alpha=0$ (i.e., nearest ground truth) is taken, corresponding to the branch leaving the ground-truth endpoint. Targets unattainable by any root in $[0,1]$ are flagged rather than silently clamped. The reported downstream sweep evaluates heart sounds from the 36 native additive rows at seven target-SDR levels per baseline, with each classifier's trained weights held fixed across isolated, interpolated, and raw-mixture inputs and every input normalised to unit RMS before feature extraction.
+
+We use \emph{raw-mixture crossing} as an operational term: the SDR at which a baseline's trajectory, walked from high to low SDR, crosses the accuracy of the same classifier on the raw mixture, located by linear interpolation between the two adjacent sampled points. A trajectory with no crossing is reported as ``always above'' or ``always below'' over the measured range. Where the word \emph{knee} appears it means this quantity and nothing more; a crossing is a property of one interpolation path, one root-selection rule and one classifier, not a minimum acceptable SDR. Cross-architecture agreement is judged against the study's own 3\,dB operational threshold, chosen for this analysis rather than taken from a standard.
+
+\paragraph{Interpretation of the accuracy--SDR trajectories}
+The interpolation in Eq.~\ref{eq:degradation} changes a waveform along a separator-specific path; SDR indexes that path but is not an independently manipulated cause of classification accuracy. Signals with the same SDR can differ in spectral and phase error, residual interference, and artifacts, and these differences can affect the two classifiers differently. Consequently, the plotted relationship is accuracy evaluated against an aggregate quality measure, not a function in which SDR alone determines accuracy. A crossing is a protocol-specific point estimate conditional on the source set, separator, interpolation path, root-selection rule, normalisation, and classifier. It is not evidence that attaining that SDR by another transformation will produce the same downstream behavior.
+
+\paragraph{Inference}
+All intervals are 95\% percentile intervals from a cluster bootstrap whose resampling unit is the leak group (24 groups among the 36 rows; every row of a drawn group enters together), because rows sharing a recording are not exchangeable and five fold means of unequal size are too few to resample. These intervals carry every claim. The accompanying $p$-values are from a paired sign-flip permutation test in which the per-row isolated-minus-separated differences of a leak group are flipped together, i.e.\ the same unit as the bootstrap; they are reported for completeness, are not adjusted for the number of separators compared, and no claim rests on them alone. The crossing and pointwise bootstraps use the same resampling unit. The whole analysis is exploratory in the sense that the hypotheses about individual separators were not pre-registered; the additive audit, the leakage-safe split and the root-selection rule were fixed before the classification results were seen.
+
+\section{Results}
+
+\subsection{Separation Quality}
+
+Table~\ref{pi:native} reports all three separation metrics on the 36 native additive rows, computed from the canonical row-level file and given under both an across-fold and a pooled convention. Bandpass has the highest pooled mean heart SDR (5.46\,dB), whereas MSSA has the highest pooled mean lung SDR (5.39\,dB).
+\begin{table*}[t]
+\centering
+\caption{Separation quality on the 36-row native additive subset, leakage-safe five-fold CV, from the canonical row-level result file. SDR is given both as the across-fold mean of per-fold means $\pm$ std over the five folds (8/7/7/7/7 rows) and as the pooled mean over the 36 rows $\pm$ 95\% $t$-interval; SIR and SAR are pooled means. B0 scores the raw mixture as both estimates and establishes the classification-reference SDR.}
+\label{pi:native}
+\small
+\FitTable{\begin{tabular}{@{}lcccc@{\hspace{1.5em}}cccc@{}}
+\toprule
+ & \multicolumn{4}{c}{Heart} & \multicolumn{4}{c}{Lung} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Method & SDR (fold) & SDR (pooled) & SIR & SAR & SDR (fold) & SDR (pooled) & SIR & SAR \\
+\midrule
+B0 raw mixture      & $2.65\pm4.34$ & $2.48\pm2.79$ & 2.48 & --- & $-2.14\pm4.19$ & $-1.98\pm2.66$ & $-1.98$ & --- \\
+B1 bandpass         & $5.61\pm3.68$ & $5.46\pm2.66$ & 6.30 & 17.47 & $3.94\pm3.57$ & $4.05\pm2.37$ & 5.73 & 12.42 \\
+B2 supervised NMF   & $2.69\pm2.96$ & $2.58\pm1.87$ & 7.27 & 7.58 & $0.62\pm3.14$ & $0.71\pm2.34$ & 2.36 & 9.93 \\
+B3 standard NMF     & $3.44\pm2.02$ & $3.35\pm1.88$ & 6.97 & 9.37 & $2.22\pm3.91$ & $2.31\pm2.81$ & 5.02 & 9.66 \\
+B4 MSSA             & $5.17\pm4.05$ & $5.02\pm2.91$ & 5.73 & 18.81 & $5.32\pm3.20$ & $5.39\pm1.87$ & 8.58 & 12.18 \\
+B5 EVMD             & $3.73\pm3.43$ & $3.61\pm2.35$ & 4.99 & 13.99 & $0.36\pm3.39$ & $0.50\pm2.44$ & 1.40 & 13.56 \\
+B6 Conv-TasNet-lite & $5.19\pm4.14$ & $5.02\pm2.77$ & 6.28 & 16.45 & $2.05\pm3.20$ & $2.13\pm2.21$ & 4.77 & 9.07 \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+The synthetic benchmark in Table~\ref{pi:substrates} yields lower SDRs than the native subset. EVMD is evaluated on a stratified 75-row subsample of the 1500 synthetic rows (15 per fold) because its per-mode ADMM costs about 17\,s per mixture on the idle CPU (Table~\ref{pi:compute}), i.e.\ seven hours for the full set per configuration; its synthetic interval is correspondingly wider and its synthetic mean is not directly comparable in precision with the other five. Conv-TasNet-lite has the highest reported synthetic heart and lung SDRs; EVMD uses a smaller synthetic subsample and is not a matched full-set comparison. The native-subset column here uses the pooled row-level convention from Table~\ref{pi:native}, so the same SDR value is used everywhere it recurs in this paper (Condition~B, the knee tables, and the compute Pareto plane).
+\begin{table*}[t]
+\centering
+\caption{Heart and lung SDR (dB) on two substrates, reported side by side for reference only: the columns differ in source pairing, gain, additive noise, sample size and purpose, and SDR must not be ranked across them. Synthetic: 1500 mixtures (500 leakage-safe heart/lung pairs $\times$ additive noise at $-5$, $15$, and $35$\,dB SNR), across-fold mean $\pm$ std, gains fitted from native rows, with a separate leakage-safe split. B5 uses a 75-row subsample. Native: 36 additive rows, pooled mean $\pm$ 95\% CI from the canonical result file.}
+\label{pi:substrates}
+\small
+\FitTable{\begin{tabular}{@{}lcc@{\hspace{2em}}cc@{}}
+\toprule
+ & \multicolumn{2}{c}{Synthetic ($n=1500$)} & \multicolumn{2}{c}{Native additive ($n=36$)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Method & Heart SDR & Lung SDR & Heart SDR & Lung SDR \\
+\midrule
+B1 bandpass & $2.10\pm0.43$ & $-1.24\pm0.44$ & $5.46\pm2.66$ & $4.05\pm2.37$ \\
+B2 supervised NMF & $-0.70\pm0.40$ & $-3.73\pm0.40$ & $2.58\pm1.87$ & $0.71\pm2.34$ \\
+B3 standard NMF & $-0.00\pm0.43$ & $-3.53\pm0.46$ & $3.35\pm1.88$ & $2.31\pm2.81$ \\
+B4 MSSA & $1.59\pm0.47$ & $-1.60\pm0.50$ & $5.02\pm2.91$ & $5.39\pm1.87$ \\
+B5 EVMD ($n=75$) & $2.42\pm1.70$ & $-2.99\pm2.25$ & $3.61\pm2.35$ & $0.50\pm2.44$ \\
+B6 Conv-TasNet-lite & $3.16\pm0.40$ & $0.37\pm0.35$ & $5.02\pm2.77$ & $2.13\pm2.21$ \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+Training diagnostics for the neural baseline are given in Table~\ref{pi:b6diag}.
+\begin{table}[t]
+\centering
+\caption{Conv-TasNet-lite (325{,}465 parameters) training per synthetic-set fold: 25 epochs $\times$ 40 steps, batch 8, SI-SDR loss. The learning-rate schedule halves the rate after four epochs without validation improvement; this was never triggered.}
+\label{pi:b6diag}
+\footnotesize
+\FitTable{\begin{tabular}{@{}cccc@{}}
+\toprule
+Fold & Epochs & Best val. SI-SDR (dB) & Fit time (s, GPU) \\
+\midrule
+0 & 25 & 0.78 & 27.1 \\
+1 & 25 & 1.78 & 26.2 \\
+2 & 25 & 2.65 & 26.2 \\
+3 & 25 & 3.35 & 26.3 \\
+4 & 25 & 1.68 & 26.2 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Classification: Isolated vs.\ Separated}
+
+Table~\ref{pi:conditionB} reports both classifiers' accuracy on isolated ground truth, the raw mixture, and each baseline's real separated heart output on the 36 native additive rows, with 95\% intervals from a cluster bootstrap over the 24 leak groups the rows fall into (5000 replicates) rather than a paired $t$-test on 5 folds. Under Architecture~1, separated-input accuracy ranges from 27.8\% to 41.7\%, compared with 52.8\% on isolated references and 38.9\% on the raw mixture; the isolated-minus-separated interval excludes zero for bandpass, standard NMF, and EVMD, and includes zero for supervised NMF, MSSA, and Conv-TasNet-lite. Under Architecture~2, isolated accuracy is again 52.8\% and the raw-mixture accuracy is 33.3\%; the isolated-minus-separated interval excludes zero for bandpass, standard NMF, MSSA, and EVMD. Compared with the raw-mixture reference, standard NMF is lower under both architectures with an interval excluding zero, while supervised NMF is higher or indistinguishable from the raw mixture under both.
+\begin{table*}[t]
+\centering
+\caption{Condition B: the Condition-A classifiers (same per-fold weights) on isolated ground truth, the raw mixture, and each baseline's real separated heart output, 36 native additive rows. Accuracy is pooled over the rows; every interval is a 95\% percentile interval from 5000 cluster-bootstrap replicates over the 24 leak groups the rows fall into. $\Delta$ = isolated minus separated, paired by row; $\Delta_{\rm raw}$ = separated minus raw mixture. $p$ is a leak-group sign-flip permutation test on $\Delta$, reported for completeness; the bootstrap intervals carry the primary claim. SDR is the method's pooled heart output from Table~\ref{pi:native}.}
+\label{pi:conditionB}
+\small
+\FitTable{\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Arch. & Input & Accuracy [95\% CI] & Macro-F1 & SDR & $\Delta$ vs.\ isolated [95\% CI] & $p$ & $\Delta_{\rm raw}$ [95\% CI] \\
+\midrule
+1 & Isolated (ground truth) & 52.8 [35.3, 70.0] & 0.51 & --- & --- & --- & --- \\
+1 & Raw mixture             & 38.9 [24.1, 53.1] & --- & 2.48 & $+13.9$ [0.0, 29.0] & 0.12 & --- \\
+1 & B1 bandpass        & 30.6 [14.3, 45.2] & 0.18 & 5.46 & $+22.2$ [2.5, 45.2] & 0.075 & $-8.3$ [$-28.6$, 8.1] \\
+1 & B2 supervised NMF  & 41.7 [24.3, 57.9] & 0.26 & 2.58 & $+11.1$ [$-8.6$, 33.3] & 0.43 & $+2.8$ [$-17.1$, 20.0] \\
+1 & B3 standard NMF    & 27.8 [14.3, 39.5] & 0.26 & 3.35 & $+25.0$ [11.6, 41.9] & 0.004 & $-11.1$ [$-24.1$, $-2.4$] \\
+1 & B4 MSSA            & 36.1 [19.4, 51.2] & 0.21 & 5.02 & $+16.7$ [$-2.4$, 38.9] & 0.18 & $-2.8$ [$-20.6$, 11.4] \\
+1 & B5 EVMD            & 27.8 [10.7, 43.2] & 0.17 & 3.61 & $+25.0$ [3.2, 48.6] & 0.062 & $-11.1$ [$-32.4$, 7.4] \\
+1 & B6 Conv-TasNet-lite & 36.1 [21.2, 51.4] & 0.33 & 5.02 & $+16.7$ [$-2.6$, 38.2] & 0.19 & $-2.8$ [$-23.5$, 16.2] \\
+\addlinespace
+2 & Isolated (ground truth) & 52.8 [34.3, 69.2] & --- & --- & --- & --- & --- \\
+2 & Raw mixture             & 33.3 [17.9, 50.0] & --- & 2.48 & $+19.4$ [$-2.7$, 38.9] & 0.15 & --- \\
+2 & B1 bandpass        & 16.7 [3.1, 30.6] & --- & 5.46 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B2 supervised NMF  & 44.4 [29.0, 57.6] & --- & 2.58 & $+8.3$ [$-10.5$, 25.0] & 0.56 & $+11.1$ [$-6.9$, 27.8] \\
+2 & B3 standard NMF    & 27.8 [11.8, 44.4] & --- & 3.35 & $+25.0$ [7.4, 40.5] & 0.031 & $-5.6$ [$-22.9$, 12.1] \\
+2 & B4 MSSA            & 16.7 [3.1, 30.6] & --- & 5.02 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B5 EVMD            & 16.7 [3.1, 30.6] & --- & 3.61 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B6 Conv-TasNet-lite & 36.1 [19.4, 52.9] & --- & 5.02 & $+16.7$ [$-3.4$, 34.4] & 0.22 & $+2.8$ [$-18.4$, 23.5] \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+\subsection{Raw-Mixture Crossings}
+\label{sec:crossings}
+
+Figure~\ref{pi:kneefig} shows the accuracy--SDR trajectories from the exact-root sweep with pointwise uncertainty, and Tables~\ref{pi:knee1} and~\ref{pi:knee2} report the protocol-specific crossing estimates read from them. The connecting lines join discrete evaluated points; they do not establish a continuous accuracy function or a causal response to SDR alone. Table~\ref{pi:points} gives, for every point, the pooled accuracy, its pointwise interval, and how many of the 36 rows actually reached the target: at the two lowest levels only 6--16 rows are attainable for most baselines (the rest sit at the method's real output), so those points are dominated by the Condition~B operating point and are drawn hollow.
+\begin{figure*}[t]
+\centering
+\PaperFigure{../results/plots/trajectories_bands.pdf}
+\caption{Accuracy--SDR trajectories from the exact-root sweep, 36 native additive rows, seven target levels per baseline, both architectures (left: MFCC+SVM; right: log-Mel+CNN). Shaded bands are 95\% pointwise intervals from a leak-group cluster bootstrap (2000 replicates over the 24 leak groups); the grey band is the same interval for the raw-mixture reference (dashed), and the dash-dot line is the isolated reference. The number above each point is the number of rows for which the target was attainable; the remaining rows contribute at the method's real output, and points with fewer than 18 attainable rows are hollow. The seven non-monotone Conv-TasNet-lite trajectories are included under the smallest-root rule (Table~\ref{pi:points} counts them per point). Lines connect discrete estimates and are not a fitted response.}
+\label{pi:kneefig}
+\end{figure*}
+
+Under the specified interpolation and classification protocol, Architecture~1 has five finite point-estimated raw-mixture crossings, from 4.5 to 20.1\,dB (Table~\ref{pi:knee1}). Supervised NMF is always above the raw-mixture reference at the sampled points. Under Architecture~2, bandpass, MSSA, and EVMD have finite protocol-specific point estimates at 7.9--9.4\,dB; supervised NMF, standard NMF, and Conv-TasNet-lite have no crossing over the evaluated points. These summaries describe the sampled trajectories, not universal minimum SDR requirements.
+\begin{table}[t]
+\centering
+\caption{Raw-mixture crossings under Architecture~1, from the exact-root sweep: the SDR at which a baseline's trajectory, walking from high to low SDR, crosses the no-separation reference (38.9\%), by linear interpolation between the two bracketing sampled points. ``Always above'' means no sampled point falls below the reference. $P(\text{crossed})$ and the interval are the row-bootstrap summary from Table~\ref{pi:kneeboot}; ``n.i.'' (not identifiable) marks an interval reaching the 25\,dB top of the measured grid. Real SDR is the method's pooled output (Table~\ref{pi:native}).}
+\label{pi:knee1}
+\footnotesize
+\FitTable{\begin{tabular}{@{}lcccc@{}}
+\toprule
+Baseline & Crossing (dB) & $P(\text{crossed})$ & 95\% interval & Real SDR (dB) \\
+\midrule
+B1 bandpass & 20.1 & 0.71 & [7.3, n.i.] & 5.46 \\
+B2 supervised NMF & always above & 0.43 & --- & 2.58 \\
+B3 standard NMF & 15.0 & 0.90 & [5.0, n.i.] & 3.35 \\
+B4 MSSA & 15.6 & 0.72 & [7.3, n.i.] & 5.02 \\
+B5 EVMD & 18.2 & 0.85 & [6.1, n.i.] & 3.61 \\
+B6 Conv-TasNet-lite & 4.5 & 0.63 & [3.1, n.i.] & 5.02 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+The two architectures do not yield a common threshold. For the four baselines with a finite point-estimate crossing under both architectures (Table~\ref{pi:knee2}), spreads are 6.3--10.7\,dB, so none meets the study's own 3\,dB agreement criterion --- an operational threshold set for this analysis, not an external standard.
+\begin{table}[t]
+\centering
+\caption{Crossings under both architectures (dB), from the exact-root sweep. ``Always above'' denotes no drop below the architecture's no-separation reference over the measured range. Agreement requires a finite crossing in both architectures and a spread within the study's 3\,dB operational threshold; no method meets this criterion.}
+\label{pi:knee2}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\FitTable{\begin{tabular}{@{}lcccc@{}}
+\toprule
+Baseline & Arch. 1 & Arch. 2 & Spread & Agree \\
+\midrule
+B1 bandpass & 20.1 & 9.3 & 10.7 & no \\
+B2 supervised NMF & always above & always above & --- & --- \\
+B3 standard NMF & 15.0 & always above & --- & --- \\
+B4 MSSA & 15.6 & 9.4 & 6.3 & no \\
+B5 EVMD & 18.2 & 7.9 & 10.3 & no \\
+B6 Conv-TasNet-lite & 4.5 & always above & --- & --- \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+
+\begin{table*}[t]
+\centering
+\caption{Every point of Figure~\ref{pi:kneefig}: pooled accuracy (\%) with its 95\% pointwise leak-group-bootstrap interval, and the number of the 36 rows for which the target level was attainable ($n_a$; the other $36-n_a$ rows sit at the method's real output and are still counted in the accuracy). All 36 rows and all 24 leak groups contribute to every point. Rows with more than one $\alpha$ root at the target (smallest taken) occur only for Conv-TasNet-lite: 2, 4, 5, 5, 6 rows at the 15, 10, 5, 0, $-5$\,dB levels. Mean achieved SDR per point is in \texttt{results/trajectory\_points.csv}.}
+\label{pi:points}
+\scriptsize\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}llccccccc@{}}
+\toprule
+Arch. & Baseline & $-5$\,dB & 0\,dB & 5\,dB & 10\,dB & 15\,dB & 20\,dB & 25\,dB \\
+\midrule
+1 & B1 bandpass & 28 [13,41] (6) & 22 [9,39] (12) & 25 [12,40] (17) & 31 [15,48] (27) & 36 [19,54] (32) & 39 [21,58] (35) & 44 [28,61] (36) \\
+1 & B2 sup. NMF & 42 [24,58] (7) & 42 [24,58] (10) & 47 [30,65] (20) & 56 [41,71] (34) & 56 [42,70] (36) & 56 [40,72] (36) & 56 [40,72] (36) \\
+1 & B3 std. NMF & 28 [13,43] (8) & 22 [12,32] (13) & 28 [16,40] (19) & 31 [18,42] (35) & 39 [22,58] (36) & 47 [31,65] (36) & 53 [36,71] (36) \\
+1 & B4 MSSA & 33 [17,48] (6) & 28 [12,46] (12) & 28 [14,42] (18) & 31 [16,48] (27) & 39 [24,58] (32) & 39 [23,59] (34) & 44 [28,61] (36) \\
+1 & B5 EVMD & 25 [10,40] (7) & 22 [9,38] (12) & 28 [12,46] (20) & 25 [10,42] (30) & 25 [11,43] (35) & 47 [31,65] (35) & 50 [33,68] (36) \\
+1 & B6 Conv-TasNet & 36 [20,53] (12) & 39 [22,56] (16) & 39 [23,56] (23) & 47 [29,68] (29) & 39 [22,58] (34) & 44 [28,63] (36) & 53 [36,70] (36) \\
+\addlinespace
+2 & B1 bandpass & 17 [3,30] (6) & 25 [6,44] (12) & 31 [9,49] (17) & 39 [18,58] (27) & 42 [22,59] (32) & 47 [28,67] (35) & 58 [41,74] (36) \\
+2 & B2 sup. NMF & 42 [27,56] (7) & 47 [32,61] (10) & 53 [35,67] (20) & 50 [34,64] (34) & 56 [39,71] (36) & 53 [34,69] (36) & 53 [34,69] (36) \\
+2 & B3 std. NMF & 33 [16,50] (8) & 42 [21,60] (13) & 42 [19,61] (19) & 47 [30,64] (35) & 56 [38,71] (36) & 58 [41,74] (36) & 53 [34,69] (36) \\
+2 & B4 MSSA & 17 [3,30] (6) & 25 [6,45] (12) & 31 [11,49] (18) & 39 [18,58] (27) & 44 [26,62] (32) & 47 [28,65] (34) & 53 [34,71] (36) \\
+2 & B5 EVMD & 19 [6,33] (7) & 25 [6,44] (12) & 31 [10,50] (20) & 42 [21,61] (30) & 50 [31,66] (35) & 53 [33,70] (35) & 56 [37,72] (36) \\
+2 & B6 Conv-TasNet & 39 [20,56] (12) & 42 [24,58] (16) & 42 [24,58] (23) & 56 [34,74] (29) & 56 [35,74] (34) & 56 [38,73] (36) & 61 [44,77] (36) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Crossing Uncertainty}
+
+The point estimates in Tables~\ref{pi:knee1} and~\ref{pi:knee2} report a single crossing per baseline from the observed 36-row curve. Table~\ref{pi:kneeboot} instead bootstraps the full curve-and-crossing construction: in each of 2000 replicates, either the 36 rows or, separately, the 24 leak groups represented in this subset are resampled with replacement, the accuracy--SDR curve and the no-separation reference are recomputed from the resampled rows, and the crossing is located with the same detector used for Table~\ref{pi:knee1}.
+
+The resampling results reveal two limitations of the point estimates. A crossing need not exist in a resampled dataset: Conv-TasNet-lite under Architecture~1 fails to cross in 35--37\% of replicates. Under Architecture~2, supervised NMF fails in 85\%, Conv-TasNet-lite in 73--75\%, and standard NMF crosses in 45\% despite having no crossing in the original sampled curve. This variation shows sensitivity to resampling, not necessarily proximity to a particular grid boundary. Conditional intervals are also wide: five of the six Architecture~1 row-bootstrap intervals reach the 25\,dB grid limit, while the supervised-NMF interval does not. The narrowest reported interval is 12\,dB wide, shared by standard NMF and EVMD under Architecture~2 with row resampling. Changing from rows to leak groups shifts conditional medians by at most 0.6\,dB, but also changes crossing probabilities and interval endpoints. These summaries do not establish that recording reuse is negligible or that sample size alone determines precision.
+
+Under Architecture~2, bandpass, MSSA, and EVMD cross in 90--98\% of replicates across the two resampling schemes, compared with 15\% for supervised NMF and 25--27\% for Conv-TasNet-lite. This is a contrast in crossing frequency among the tested methods, rather than proof of a general separator ranking or a causal distinction between spectral-stripping and mask-preserving methods.
+
+\begin{table*}[t]
+\centering
+\caption{Bootstrap uncertainty of the crossings (2000 replicates), resampling either the 36 rows i.i.d.\ or the 24 leak groups they fall into, using the exact-root curves. Each replicate recomputes the curve, its no-separation reference, and the crossing with the detector for Table~\ref{pi:knee1}. $P(\text{crossed})$ is the fraction of replicates with a well-defined crossing; medians and 2.5--97.5 percentile intervals (dB) are conditional on those replicates. ``n.i.'' marks a percentile at the 25\,dB top of the measured grid.}
+\label{pi:kneeboot}
+\small
+\FitTable{\begin{tabular}{@{}llcc@{\hspace{1.5em}}cc@{}}
+\toprule
+ & & \multicolumn{2}{c}{Rows ($n=36$)} & \multicolumn{2}{c}{Leak groups ($n=24$)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Arch. & Baseline & $P(\text{crossed})$ & Median [95\% CI] & $P(\text{crossed})$ & Median [95\% CI] \\
+\midrule
+1 & B1 bandpass         & 0.71 & 15.4 [7.3, n.i.]  & 0.75 & 15.6 [8.5, n.i.] \\
+1 & B2 supervised NMF   & 0.43 & 6.2 [3.4, 22.5]   & 0.39 & 5.7 [3.1, 18.7] \\
+1 & B3 standard NMF     & 0.90 & 15.0 [5.0, n.i.]  & 0.97 & 15.0 [6.0, 23.8] \\
+1 & B4 MSSA             & 0.72 & 15.4 [7.3, n.i.]  & 0.75 & 15.6 [7.3, n.i.] \\
+1 & B5 EVMD             & 0.85 & 18.0 [6.1, n.i.]  & 0.92 & 18.1 [7.3, n.i.] \\
+1 & B6 Conv-TasNet-lite & 0.63 & 18.4 [3.1, n.i.]  & 0.65 & 19.0 [2.8, n.i.] \\
+\midrule
+2 & B1 bandpass         & 0.95 & 9.5 [4.3, 21.7]   & 0.98 & 9.5 [3.6, 22.5] \\
+2 & B2 supervised NMF   & 0.15 & 3.9 [1.7, 22.5]   & 0.15 & 3.8 [1.7, n.i.] \\
+2 & B3 standard NMF     & 0.45 & 4.2 [1.7, 13.7]   & 0.45 & 4.6 [1.7, 14.2] \\
+2 & B4 MSSA             & 0.94 & 9.4 [4.3, 21.7]   & 0.94 & 9.3 [3.5, 23.4] \\
+2 & B5 EVMD             & 0.90 & 8.3 [3.2, 15.2]   & 0.93 & 8.2 [2.5, 15.2] \\
+2 & B6 Conv-TasNet-lite & 0.27 & 8.2 [2.9, 22.5]   & 0.25 & 8.5 [2.0, 23.3] \\
+\bottomrule
+\end{tabular}}
+\end{table*}
+
+Conv-TasNet-lite under Architecture~1 illustrates why point estimates should be read together with their bootstrap distributions. Its protocol-specific crossing estimate is 4.5\,dB (Table~\ref{pi:knee1}), compared with a conditional row-bootstrap median of 18.4\,dB and crossing probability of 0.63. Resampling can change which crossing a high-to-low detector selects when the accuracy curve fluctuates around the reference. This is a possible explanation for the discrepancy, not an established mechanism. Non-monotonicity of SDR as a function of $\alpha$, documented separately by the root audit, must not be equated with non-monotonicity of aggregate accuracy as a function of SDR. The point estimate, crossing probability, and conditional interval together indicate instability rather than an unusually favorable threshold.
+
+\paragraph{Uncertainty of the accuracy trajectories}
+Table~\ref{pi:kneeboot} summarizes the existence and location of crossings; Table~\ref{pi:points} and the bands of Figure~\ref{pi:kneefig} give the pointwise uncertainty of every accuracy estimate along the trajectories, from the same leak-group resampling (2000 replicates; the raw-mixture reference is resampled with the same draws). The bands are pointwise, not simultaneous, intervals; they overlap for most pairs of separators at most levels, and every band is at least 25 points wide. All 36 rows and all 24 leak groups enter every point, but only the rows for which the target was attainable are actually degraded to it: at the $-5$ and 0\,dB levels that is 6--16 rows for every baseline (Table~\ref{pi:points}), so those points largely restate the Condition~B operating point rather than a lower-SDR condition, and the effective denominator for a claim about a specific SDR level is $n_a$, not 36. The seven non-monotone Conv-TasNet-lite trajectories contribute 2--6 multiple-root rows per level from 15\,dB downward; their smallest-root points are included and the count is given per level. No effective-sample-size adjustment beyond the cluster resampling is applied; the 24 leak groups (one of five rows, one of three, six of two, sixteen singletons) bound the number of independent units.
+
+\subsection{Computational Cost}
+
+Table~\ref{pi:compute} gives compute counts and latency measured on an idle workstation, repeating an earlier measurement that was made under a contended shared machine (load average 74.6) and inflated the CPU-bound methods by roughly 10--340$\times$; that earlier measurement, and the Pareto claim it supported, are retracted.
+\begin{table}[t]
+\centering
+\caption{Compute cost per 15\,s mixture (60{,}000 samples at 4\,kHz). MACs are exact counts except MSSA and EVMD (estimates). Latency: one untimed warm-up then $n$ timed repetitions ($n=5$; 3 for EVMD) on an idle workstation (Core i9-9900K, 16 threads, load average 0.6; an RTX~3060 GPU is used only for Conv-TasNet-lite), reported as median wall-clock time with the p5--p95 range and the real-time factor (15\,s / median).}
+\label{pi:compute}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\FitTable{\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Method & Params & MACs & Latency (ms) & p5--p95 & RTF \\
+\midrule
+B1 bandpass & 0 & 2.4\,M & 3.63 & 3.62--3.70 & 4130 \\
+B2 supervised NMF & 7{,}710 & 219\,M & 17.2 & 17.1--22.2 & 873 \\
+B3 standard NMF & 0 & 1.16\,G & 61.4 & 60.6--61.6 & 244 \\
+B4 MSSA & 0 & 1.20\,G & 1{,}097 & 1{,}057--1{,}117 & 13.7 \\
+B5 EVMD & 0 & 5.22\,G & 16{,}812 & 16{,}794--16{,}882 & 0.89 \\
+B6 Conv-TasNet-lite (GPU) & 325{,}465 & 1.96\,G & 16.7 & 16.7--16.7 & 899 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+Using the native-additive heart-SDR point estimates and reported MAC counts, bandpass is Pareto-dominant on the MAC axis among the tested baselines. Under the measured hardware configuration, it is also Pareto-dominant on the latency axis. Conv-TasNet-lite runs on an RTX~3060 GPU while the other five baselines run on the Core i9-9900K CPU, so this latency ranking is conditional on those devices and execution modes rather than a hardware-independent property or a statistical test of superiority. Figure~\ref{pi:pareto} plots both planes from the canonical SDR file and the idle-machine latencies of Table~\ref{pi:compute}.
+\begin{figure*}[t]
+\centering
+\PaperFigure{../results/plots/sdr_compute_plane.png}
+\caption{Separation quality (pooled heart SDR on the 36 native additive rows, 95\% CI) against compute cost: MACs (left) and idle-machine median latency (right), the latter from Table~\ref{pi:compute}. Filled markers are Pareto non-dominated on that axis. Under the measured devices and execution modes (CPU for five baselines, GPU for Conv-TasNet-lite) bandpass is non-dominated on both axes and every other baseline is dominated; this is a description of the tested configuration, not a hardware-independent ranking.}
+\label{pi:pareto}
+\end{figure*}
+
+
+\subsection{Embedded Feasibility}
+\label{sec:embedded}
+
+As a feasibility demonstration for the cheapest baseline only, the bandpass separator was ported to an Arduino Nano 33 BLE Sense (nRF52840, Cortex-M4F at 64\,MHz, 256\,kB SRAM, 1\,MB Flash; PlatformIO~6.2.0, Mbed~OS core~4.6.0, GCC~7.2.1, CMSIS-DSP~1.17.1 float32 biquads on the FPU). It differs from the desktop reference in one intended respect --- a causal second-order-section filter processing 256-sample (64\,ms) blocks with carried state, instead of zero-phase forward--backward filtering --- so it is a deployment variant, not a bit-equivalent reproduction; over the 145 native rows the causal desktop variant differs from the zero-phase one by $+0.18$ / $-0.04$\,dB (heart / lung) in mean SDR. On three native-additive clips replayed from Flash (the same \texttt{int16} samples the desktop filters, no microphone), the board output matches a desktop \emph{causal} reference at float32 precision (max abs.\ error $1.2\times10^{-5}$ heart, $6.3\times10^{-7}$ lung; SDR equal to three decimals) and both classifiers give the same prediction on the board output, the causal reference and the zero-phase output for all three clips (Table~\ref{pi:embedded}); with $n{=}3$ this is an agreement count, and no classification result is claimed from the embedded output. The build uses 45{,}992\,B of static SRAM and 437{,}612\,B of Flash (360{,}000\,B of it the clips); a 15\,s clip filters in 206--209\,ms (RTF 72 by the paper's convention), $0.89$\,ms per 64\,ms block on average. Each clip was run once and per-block maxima were not logged, so this is a large average margin, not a verified block deadline; energy, a microphone path and the other five separators were not measured.
+
+\begin{table}[t]
+\centering
+\caption{Embedded feasibility of the bandpass baseline: Nano 33 BLE Sense, three native-additive clips replayed from Flash. Errors are board output vs.\ the desktop causal reference on identical input; SDR is heart-source BSS Eval; agreement is the number of clips on which the classifier prediction on the board output equals that on the reference ($n{=}3$).}
+\label{pi:embedded}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}p{2.7cm}p{5.4cm}@{}}
+\toprule
+Device & Nano 33 BLE Sense (nRF52840, Cortex-M4F, 64\,MHz, 256\,kB SRAM, 1\,MB Flash) \\
+Sample rate / channels & 4\,kHz, mono, \texttt{int16} input \\
+Block size & 256 samples (64\,ms) \\
+Arithmetic & float32 on the hardware FPU; CMSIS-DSP df2T biquads \\
+Static SRAM / Flash & 45{,}992\,B (17.5\%) / 437{,}612\,B, of which 360{,}000\,B are the embedded clips \\
+Compute per 15\,s clip & 206--209\,ms ($3.43$--$3.49$\,\textmu s per sample) \\
+Mean compute per block & 0.89\,ms of a 64\,ms block (1.4\% duty); P95 not logged \\
+RTF ($15\,\text{s}/\text{time}$) & 72 \\
+Waveform error, heart & max abs.\ $1.2\times10^{-5}$; rel.\ RMS $1.1$--$1.5\times10^{-5}$ \\
+Waveform error, lung & max abs.\ $6.3\times10^{-7}$; rel.\ RMS $0.8$--$2.1\times10^{-6}$ \\
+Heart SDR (board = causal ref.) & 4.92 / 18.91 / 4.56\,dB; zero-phase 4.84 / 17.88 / 4.19\,dB \\
+Prediction agreement & board vs.\ causal: SVM 3/3, CNN 3/3; causal vs.\ zero-phase: 3/3, 3/3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+
+\paragraph{Why the reproduced NMF method does not beat a fixed filter}
+Supervised NMF, reproduced with the reported ranks ($K_i=10$, $K_r=20$), iteration counts, STFT hop, and pre-denoising band, scores 2.58\,dB pooled heart SDR on native additive rows against 5.46\,dB for bandpass, and 0.71 versus 4.05\,dB on lung (Table~\ref{pi:native}). Leakage-safe dictionary fitting excludes recordings reused in held-out mixtures, and the fixed hyperparameters may not transfer to this evaluation. Both are plausible explanations for the result, but their individual effects are not isolated here.
+
+Oracle masks constructed from the true source spectrograms on the same $512/256$ STFT grid provide a diagnostic reference. The ideal ratio mask reaches $11.5\pm1.9$\,dB heart and $9.2\pm1.7$\,dB lung SDR (95\% CI over 36 rows), compared with 2.48 and $-1.98$\,dB for the raw mixture; the ideal Wiener filter reaches 12.4 and 10.6\,dB. On this STFT grid, the ideal ratio and ideal Wiener masks reach approximately 11.5--12.4\,dB heart and 9.2--10.6\,dB lung SDR; these values provide a diagnostic ceiling for the tested mask formulation, not a universal upper bound for all separators, since a different filterbank, phase-reconstruction step, or a time-domain method is not covered by this comparison. The observed oracle heart scores are below the 15.0--20.1\,dB crossings of bandpass, standard NMF, MSSA, and EVMD under Architecture~1; this cross-method comparison does not predict the classifier performance an oracle-mask output would obtain.
+
+The Condition~B and crossing results qualify the NMF interpretation. Despite its 2.58\,dB heart SDR in that evaluation, supervised NMF has the highest separated-input SVM accuracy (41.7\%) and remains above the raw-mixture reference under both architectures throughout the measured range. Retention of classifier-relevant spectral structure is one possible explanation for this pattern. However, the present results do not isolate spectral-envelope preservation as the cause, or imply that higher separation SDR necessarily produces better classification.
+
+\paragraph{Reconciling the size of the drop with Yaqub et al.}
+Yaqub et al.\ \cite{yaqub2025} report accuracy falling from 89.0\% to 41.0\% (weighted F1 $0.89\to0.39$, $n=5365$ evaluations) when their ResNet-18, retrained on clean HLS-CMDS heart sounds (Experiment~3, test $n=278$), is re-evaluated on bandpass-separated heart sounds (Experiment~4, Table~9). Condition~B reproduces the direction for every one of six separators at roughly half the size: the drop is 11--25 points under the SVM and 8--36 points under the CNN, and the leak-group cluster bootstrap of the row-paired isolated-minus-separated difference excludes zero for three methods under the SVM (bandpass, standard NMF, EVMD) and four under the CNN (bandpass, standard NMF, MSSA, EVMD). Bandpass --- their separator --- loses 22 points under the SVM and 36 under the CNN here.
+
+Several differences limit direct comparison. Condition~B evaluates only 36 additive rows, so one row changes pooled accuracy by approximately 2.8 percentage points; recording reuse further limits independence. Architecture~1 scores 60.0\% on the 50-recording Condition-A set but 52.8\% on Condition~B's own isolated heart references, whereas the published classifier begins at 89.0\%. These evaluation sets, classifiers, and protocols differ. Condition~B also excludes the 109 rows that fail the additive-source check, whereas the published comparison uses the full mixed set. These differences may contribute to the discrepancy, but their contributions are not separately measured.
+
+Bandpass output scores below both isolated audio and the untouched mixture in this evaluation. Its point-estimated crossings are 20.1\,dB under the SVM and 9.3\,dB under the CNN, compared with 5.46\,dB for its real output. Supervised NMF, by contrast, remains above the raw-mixture reference under both classifiers, and Conv-TasNet-lite and standard NMF do so under the CNN. Thus, a bandpass result cannot be generalized to all separators. Since Yaqub et al.\ do not report the SDR of their separated outputs, their accuracy collapse cannot be placed quantitatively on the present curves. Neither the comparison nor the crossings establish that discarding the spectral envelope alone causes the published loss.
+
+The audit and downstream evaluation address different assumptions. Structural validity of a manifest does not establish acoustic correspondence between a mixture and its named sources; the sensitivity check in Section~\ref{sec:methodology} shows the additive-audit verdict is stable to the alignment and scaling models tested, but does not extend to models not tested. Likewise, a separated-versus-isolated accuracy difference does not establish whether separation improves on a raw-mixture input. Reporting the raw-mixture reference and both classifier architectures exposes this distinction: the sign of the apparent benefit and the location or existence of a crossing depend on the classifier. Aggregate SDR and a single accuracy delta cannot replace this joint evaluation.
+
+\paragraph{Embedded feasibility}
+The embedded result complements the desktop cost analysis without replacing it: feasibility and separation quality are separate considerations. The bandpass baseline runs on the tested device with output matching a desktop causal reference, but its causal implementation differs from the zero-phase pipeline in phase response and, by up to $1$\,dB on the clips tested, in SDR; quantised separators, energy per inference, per-block worst-case timing and an end-to-end microphone-to-classifier path are outside this study's scope.
+
+\paragraph{Limitations}
+The crossing analysis uses a pool of 36 native additive rows and seven target-SDR levels per baseline. When all 36 rows contribute, changing one prediction changes pooled accuracy by approximately 2.8 percentage points; this resolution differs if target attainability reduces the contributing set. Table~\ref{pi:kneeboot} quantifies uncertainty in crossings and Table~\ref{pi:points} the pointwise uncertainty of every accuracy estimate; the bands of Figure~\ref{pi:kneefig} overlap for most pairs of separators at most levels, and the two lowest levels of every trajectory rest on 6--16 attainable rows. Row- and leak-group-bootstrap conditional medians differ by at most 0.6\,dB, while interval widths and crossing probabilities remain variable. This comparison does not isolate sample size as the sole constraint on precision. The classification experiment concerns heart sounds and does not establish corresponding lung-classification thresholds. Classifier tuning and model selection require fuller documentation before architecture effects can be separated from tuning effects. Seven of 432 method--row--source SDR trajectories are non-monotone in $\alpha$ and are retained under the smallest-root rule; per-point attainability and root multiplicity are given in Table~\ref{pi:points}.
+
+Conv-TasNet-lite was trained for 25 epochs per fold; these diagnostics do not establish convergence or the best performance achievable by its model family. EVMD was evaluated on only 75 of the 1500 synthetic rows. Native and synthetic evaluations differ in source pairing and noise, so their SDRs are not interchangeable. The 4000\,Hz files versus the descriptor's stated 22{,}050\,Hz (Section~\ref{sec:methodology}) is a property of the release that this study reports but cannot resolve. The paired fold-level significance tests reported in an earlier version of this evaluation are superseded here by the leak-group cluster bootstrap in Table~\ref{pi:conditionB}; that bootstrap remains exploratory, resting on 24 leak groups rather than independent recordings.
+
+\paragraph{Future matched-SDR corruption experiment}
+A direct follow-up would compare distinct corruptions at matched SDR on the same held-out source recordings. Candidate perturbations include frequency-selective attenuation, phase perturbation, residual cross-source interference, and additive artifacts, with severity adjusted to attainable targets under the same SDR definition. The comparison should hold the source set, classifier weights, and unit-RMS normalisation fixed, use a common attainable subset for paired comparisons, and report leak-group-bootstrap uncertainty for differences in accuracy. Such an experiment would test whether different error structures at the same measured SDR produce different downstream behavior. It has not been performed here, and the present interpolation trajectories should not be described as establishing that result directly.
+
+\paragraph{Closing}
+On the 36-row native additive HLS-CMDS subset, bandpass has the highest pooled heart-source SDR among the six tested separators (5.46\,dB). The raw-mixture crossings are protocol-specific point estimates with substantial bootstrap uncertainty, not general quality thresholds. Observed oracle-mask SDRs are diagnostic comparison points and do not determine the downstream accuracy of another signal with the same SDR. Some separated outputs classify below the raw-mixture reference, while supervised NMF preserves accuracy better than its SDR rank alone would suggest. This pattern does not establish equivalence, a uniformly harmful effect of separation, or spectral-envelope preservation as its sole explanation. Yaqub et al.'s published accuracy loss motivates the comparison, but its unreported separation SDR prevents locating it quantitatively on these trajectories.
+
+\paragraph{Reproducibility}
+All code, the canonical row-level result file (\texttt{results/canonical\_rows.csv}), the sweep provenance with per-row $\alpha$, attainability and root counts, and every intermediate CSV behind the tables are released with this paper; each table and figure is regenerated by a named \texttt{make} target from those files, and the numbers printed here were cross-checked against them programmatically. The working copy of HLS-CMDS is byte-identical to the Mendeley release (MD5 of every file recorded in the repository). Random seed 0 is used for fold assignment, NMF initialisation, synthetic mixing and network training; Conv-TasNet-lite on the GPU is not bit-reproducible across runs. Software: Python 3.12.4, numpy 2.4.6, scipy 1.17.1, librosa 0.11.0, scikit-learn 1.9.0, torch 2.3.1+cu121, mir\_eval 0.8.2; hardware for the latency table: Core i9-9900K, 65.7\,GB RAM, RTX~3060, Linux 6.8.
+
+\section{Conclusion}
+
+This study connects separation-quality reporting with downstream heart-sound classification through an accuracy--SDR analysis. The native pairing audit identifies a 36-row additive subset for the exploratory curves, a verdict that is stable across seven alternative alignment and scaling models tested for sensitivity, and a distinct synthetic benchmark broadens the separation-quality comparison at scale.
+
+On the 36-row native additive subset, bandpass has the highest pooled heart SDR among the six tested separators (5.46\,dB). The exact-root sweep gives protocol-specific point-estimated crossings of 4.5--20.1\,dB under Architecture~1 and 7.9--9.4\,dB for the three finite crossings under Architecture~2. These values depend on the interpolation path, root-selection rule, and classifier; bootstrap results indicate substantial uncertainty, including instability of the Conv-TasNet-lite/SVM estimate. Under the measured hardware configuration, the idle-machine measurements place bandpass on the Pareto frontier ahead of the other tested baselines on both MAC and latency axes; this ranking is not a hardware-independent deployment claim.
+
+SDR is an aggregate quality axis, not a sufficient description of the signal errors that influence a classifier. Joint evaluation is therefore needed to distinguish separation fidelity from downstream utility. The present results are conditional on the tested sources, separators, classifiers, normalisation, and interpolation protocol; they establish neither a universal SDR threshold nor a uniform benefit or cost of separation. A matched-SDR comparison of distinct corruption mechanisms remains an important follow-up analysis. The published $89.0\%\to41.0\%$ bandpass-related loss remains a motivating observation, not a measured point on the curves in this study.
+
+\begin{thebibliography}{99}
+
+\bibitem{torabi_descriptor} Y.\ Torabi, S.\ Shirani, and J.\ P.\ Reilly, ``Descriptor: Heart and Lung Sounds Dataset Recorded from a Clinical Manikin using Digital Stethoscope (HLS-CMDS),'' \emph{IEEE Data Descriptions}, 2025.
+
+\bibitem{torabi_diss} Y.\ Torabi, ``AI-Driven Cardiorespiratory Signal Processing: Separation, Clustering, and Anomaly Detection,'' Ph.D.\ dissertation, McMaster University, 2025.
+
+\bibitem{yaqub2025} A.\ Yaqub, M.\ S.\ Orakzai, M.\ F.\ Qureshi, Z.\ Mushtaq, I.\ Siddique, and T.\ Radwan, ``Spectrotemporal Deep Learning for Heart Sound Classification under Clinical Noise Conditions,'' \emph{Computer Modeling in Engineering \& Sciences}, vol.\ 145, no.\ 2, pp.\ 2503--2529, 2025.
+
+\bibitem{puneet2025} A.\ Puneet, P.\ Shankar, S.\ R.\ R.\ Koluguri, and A.\ Srivastava, ``Edge-Enabled Portable Classifier for Lung Sounds Using Convolutional Neural Networks,'' \emph{Proc.\ 2025 IEEE BioCAS}, pp.\ 21--25, 2025.
+
+\bibitem{han2026} Y.\ Han, Z.\ Quan, K.\ Matuszewski, and B.\ Corbett, ``Respiratory Disease Classification Using NMF-Enhanced Log-Mel Spectrograms and Convolutional Recurrent Neural Networks,'' \emph{Sensors}, vol.\ 26, no.\ 13, art.\ 4268, 2026.
+
+\bibitem{han_quan_ssa} B.\ Han and W.\ Quan, ``Cardiorespiratory Sound Separation Using Singular Spectrum Analysis,'' \emph{Proc.\ 17th Int'l Conf.\ Signal Processing Systems (ICSPS)}, 2025.
+
+\bibitem{vincent2006} E.\ Vincent, R.\ Gribonval, and C.\ F\'evotte, ``Performance measurement in blind audio source separation,'' \emph{IEEE Trans.\ Audio, Speech, Lang.\ Process.}, vol.\ 14, no.\ 4, pp.\ 1462--1469, 2006.
+
+\bibitem{raffel2014} C.\ Raffel et al., ``mir\_eval: A Transparent Implementation of Common MIR Metrics,'' \emph{Proc.\ ISMIR}, 2014.
+
+\bibitem{luo2019} Y.\ Luo and N.\ Mesgarani, ``Conv-TasNet: Surpassing Ideal Time--Frequency Magnitude Masking for Speech Separation,'' \emph{IEEE/ACM Trans.\ Audio, Speech, Lang.\ Process.}, vol.\ 27, no.\ 8, pp.\ 1256--1266, 2019.
+
+\end{thebibliography}
+
+\end{document}

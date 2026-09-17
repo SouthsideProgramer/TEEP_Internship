@@ -15,7 +15,7 @@ CLIPS      := 3
 PORT       :=
 TORCH_INDEX := https://download.pytorch.org/whl/cu121
 
-.PHONY: help all venv install test validate split eval-harness baselines \
+.PHONY: help all venv install dataset spike-checks test validate split eval-harness baselines \
         baseline1 baseline2 baseline3 baseline4 baseline5 baseline6 synthetic-set \
         baseline12-synthetic first-sdr-table heart-classifier degradation-scheme sdr-sweep condition-b \
         sdr-accuracy-curve sdr-knee-point compute-cost heart-classifier-cnn latency sdr-compute-plane \
@@ -29,6 +29,10 @@ TORCH_INDEX := https://download.pytorch.org/whl/cu121
 help:
 	@echo "Setup:"
 	@echo "  make install       create $(VENV) and install requirements.txt"
+	@echo "  make dataset       unpack HLS-CMDS.zip (download it first, see README.md) into HLS_CMDS/"
+	@echo "                     and verify the six release checksums"
+	@echo "  make spike-checks  the four read-only review checks in spike/ (teep-spike repo only);"
+	@echo "                     README.md's clean-checkout proof"
 	@echo ""
 	@echo "  make all           validate + split + eval-harness + test + stats + plots + baselines"
 	@echo "                     (~15-20 min, dominated by baseline2's per-fold NMF dictionary fitting,"
@@ -180,6 +184,40 @@ $(VENV)/bin/activate:
 
 install: venv
 	$(PIP) install -r requirements.txt --extra-index-url $(TORCH_INDEX)
+
+# HLS-CMDS is CC BY 4.0 but not redistributed here: download the Mendeley v3
+# archive as HLS-CMDS.zip into the repo root (README.md, "Dataset"), then this
+# target lays it out the way src/load_dataset.py expects (HLS_CMDS/{HS,LS,Mix}/
+# next to the three CSVs) and checks the six artifacts against the release
+# checksums. The outer archive holds the inner zips under one long-named folder.
+DATASET_ZIP := HLS-CMDS.zip
+dataset: $(DATASET_ZIP)
+	rm -rf HLS_CMDS && mkdir -p HLS_CMDS
+	unzip -q -j $(DATASET_ZIP) -d HLS_CMDS
+	cd HLS_CMDS && printf '%s\n' \
+	  '46d5dc3fc3d96c122620bafc68c34652876842b5abbde4aacd5a778d621a5a15  HS.csv' \
+	  'aa2c80a1430b2d105b49071e8cc72b9da3014df85e8c60be75683155c6f431fe  HS.zip' \
+	  '2f5ba55a7d0d3ded2edaae003eccc3164e3d860437836cdc998c9a4b928d8bd0  LS.csv' \
+	  'ac3c9df63518a5aa0431ec7bb50531f63f930e403a3d858445545592ef309811  LS.zip' \
+	  'c021907ac4a8775900e4a60cd47e8caac4d6ec383466d018c98bb3d4322433a1  Mix.csv' \
+	  'c0c3eb1a36ed20c1d323bac8390dcc4ddb6e46052ce9e70242bb70da57f7fb17  Mix.zip' \
+	  | sha256sum -c -
+	cd HLS_CMDS && for z in HS LS Mix; do unzip -q -o $$z.zip -x '__MACOSX/*'; done
+	@echo "HLS_CMDS/: $$(ls HLS_CMDS/HS/*.wav | wc -l) HS, $$(ls HLS_CMDS/LS/*.wav | wc -l) LS, $$(ls HLS_CMDS/Mix/*.wav | wc -l) Mix recordings"
+
+$(DATASET_ZIP):
+	@echo "$(DATASET_ZIP) not found. Download the HLS-CMDS v3 archive from"; \
+	echo "https://data.mendeley.com/datasets/8972jxbpmp/3 and save it as ./$(DATASET_ZIP)"; \
+	exit 1
+
+# The four review checks of spike/ (Satya's teep-spike repository, which carries
+# this Makefile unchanged). Read-only except review_checks.py, which rewrites
+# spike/out/confirm_levels.csv and review_bootstrap.csv with the same content.
+spike-checks:
+	@test -d spike || { echo "spike/ is in the teep-spike repository, not this one"; exit 1; }
+	for s in check_heldout_distinct check_lung_overlap check_labels_folds review_checks; do \
+	  echo "== spike/$$s.py"; PYTHONPATH=$(SRC):spike $(PYTHON) spike/$$s.py || exit 1; done
+	@echo "spike-checks: all four passed"
 
 all: validate split eval-harness test stats plots baselines
 

@@ -1,4 +1,8 @@
-# Python 3.11 environment for audio analysis (numpy/scipy/librosa/mir_eval) + CUDA
+# Python 3.12 environment for audio analysis (numpy/scipy/librosa/mir_eval) + CUDA
+#
+# Versions are the ones the released results were produced with (python 3.12.4,
+# `pip freeze` of .venv on 18 Sep 2026); a clean install of this file is what
+# README.md's "Reproducing from a clean checkout" is verified against.
 #
 # Install with:
 #   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
@@ -16,6 +20,11 @@ soundfile==0.14.0
 matplotlib==3.11.1
 pytest==9.1.1
 ipython==9.16.1
+# Classifiers: src/heart_classifier.py (SVM) and the fold/threading helpers.
+# Both were missing from this file until 18 Sep 2026 -- an install of the
+# earlier file could not run any classification script.
+scikit-learn==1.9.0
+threadpoolctl==3.6.0
 
 # Host side of firmware/ -- only firmware/tools/capture_serial.py imports it,
 # to read the board's binary frames off the USB serial port.
@@ -23,6 +32,9 @@ pyserial==3.5
 
 # CUDA-enabled PyTorch (pulls in matching nvidia-*-cu12 runtime libs automatically)
 torch==2.3.1+cu121
+# ImageNet-initialised ResNet-18 for the spike/ extension (teep-spike repo,
+# spike/resnet_arch3.py); the +cu121 build must match torch's.
+torchvision==0.18.1+cu121
 
 # NVIDIA CUDA toolkit / Python bindings (for direct CUDA access outside torch)
 cuda-toolkit==13.0.3.0

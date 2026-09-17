@@ -1,0 +1,487 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\title{Run Report: \texttt{make all} Output and Discussion}
+\author{TEEP Internship}
+\date{2026-08-19}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document walks through the literal console output of one full
+\texttt{make all} run (validate $\to$ split $\to$ eval-harness $\to$ test
+$\to$ stats $\to$ plots $\to$ baselines, run 2026-08-19, all 10 stages
+completed with no errors) and discusses what each stage's numbers mean.
+Where \texttt{report/report.tex} presents the polished, aggregated
+narrative, this document keeps the per-fold detail that report intentionally
+compresses away, since that detail turns out to carry a real finding: fold
+composition, not separation method, explains most of the fold-to-fold
+variance in the results. As in \texttt{report.tex}, every number here is
+computed on the current, provisional (GitHub-sourced, not yet
+Mendeley-verified) copy of HLS-CMDS.
+\end{abstract}
+
+\tableofcontents
+
+% ============================================================
+\section{Stage 1: Dataset Validation (\texttt{make validate})}
+% ============================================================
+
+\texttt{load\_dataset.py} loaded all three manifests and resolved every
+referenced audio file:
+
+\begin{verbatim}
+HS:  50 rows, all audio files found
+LS:  50 rows, all audio files found
+Mix: 145 rows, all audio files found
+Sample rate: 4000 Hz
+Additivity check (mixed ~= a*(heart+lung)): 36/145 rows additive
+\end{verbatim}
+
+\textbf{Discussion.} The first three lines are a pure integrity check ---
+every row's audio exists and is readable --- and are unremarkable on their
+own. The last two lines are not: 4000\,Hz does not match the 22{,}050\,Hz
+the HLS-CMDS descriptor paper documents, and only 36 of 145 mixture rows
+are acoustically related to their own named heart/lung sources. Both are
+symptoms of the same root cause (this working copy is sourced from a
+GitHub mirror, not the Mendeley release the project specifies) and both
+propagate into every later stage's numbers. This is the single most
+important fact to carry forward from this run: nothing below should be read
+as a claim about HLS-CMDS itself until it is re-verified on the correct
+dataset copy.
+
+% ============================================================
+\section{Stage 2: Leakage-Safe Split (\texttt{make split})}
+% ============================================================
+
+\begin{verbatim}
+Leak groups: 29 covering 145 mix rows
+Group sizes: [32, 22, 19, 13, 11, 9, 4, 4, 3, 3, 3, 2, 2, 2, 2,
+              1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+\end{verbatim}
+
+\begin{table}[H]
+\centering
+\caption{5-fold split (seed 0) over the full 145-row \texttt{Mix.csv}.}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Fold & Eval rows & HS pool & LS pool \\
+\midrule
+0 & 32 & 44/50 & 46/50 \\
+1 & 29 & 43/50 & 46/50 \\
+2 & 28 & 44/50 & 47/50 \\
+3 & 28 & 40/50 & 43/50 \\
+4 & 28 & 47/50 & 38/50 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Discussion.} Fold 0 is visibly larger (32 rows) than the other four
+(28--29) because it absorbs the single size-32 leak group whole ---
+splitting it would violate the no-leakage guarantee, so the greedy
+largest-group-first assignment accepts the imbalance instead. This is
+expected and by design, but it means fold 0's per-fold numbers
+(Sections~\ref{sec:evalharness}--\ref{sec:baselines}) are averaged over
+more rows than any other fold and should not be read as ``a random 20\% of
+the data'' the way the other four folds approximately are.
+
+% ============================================================
+\section{Stage 3: Evaluation Harness Smoke Test (\texttt{make eval-harness})}
+\label{sec:evalharness}
+% ============================================================
+
+This stage runs a no-op ``baseline'' (returns the mixed signal unmodified as
+both source estimates) through the full k-fold harness purely to confirm the
+fold $\to$ fit $\to$ separate $\to$ score $\to$ aggregate plumbing works
+end-to-end against real audio, before any real separation method is trusted.
+Because it applies no processing, its numbers also double as the
+``no-separation'' reference used in \texttt{report.tex}.
+
+\begin{table}[H]
+\centering
+\caption{No-separation reference, per fold (full 145 rows).}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Heart} & \multicolumn{3}{c}{Lung} \\
+Fold & SDR & SIR & SAR & SDR & SIR & SAR \\
+\midrule
+0 & $-14.93$ & $1.78$ & $0.99$  & $-17.14$ & $-1.61$ & $0.99$ \\
+1 & $-14.78$ & $0.40$ & $5.04$  & $-15.56$ & $-0.24$ & $5.04$ \\
+2 & $-12.05$ & $2.79$ & $10.30$ & $-15.78$ & $-2.58$ & $10.30$ \\
+3 & $-12.77$ & $2.33$ & $6.61$  & $-16.13$ & $-2.16$ & $6.61$ \\
+4 & $-13.89$ & $1.24$ & $9.36$  & $-14.85$ & $-1.17$ & $9.36$ \\
+\midrule
+Mean $\pm$ std & $-13.68\pm1.26$ & $1.71\pm0.93$ & $6.46\pm3.71$ & $-15.89\pm0.84$ & $-1.55\pm0.91$ & $6.46\pm3.71$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Discussion.} Two sanity properties confirm the harness is wired
+correctly: SAR is identical for heart and lung within every fold (with no
+processing applied, there is nothing to distinguish one source's
+``artifacts'' from the other's --- both estimates are the same signal), and
+SAR moves in lockstep with fold size/composition (fold 0's 0.99\,dB SAR is
+far below the others' 5--10\,dB), which is exactly the pattern
+Section~\ref{sec:baselines} shows persisting once a real separation method
+is applied. That persistence is the tell that fold identity, not method
+choice, is doing a lot of the work in these numbers --- a theme this report
+returns to in Section~\ref{sec:discussion}.
+
+% ============================================================
+\section{Stage 4: Test Suite (\texttt{make test})}
+% ============================================================
+
+\begin{verbatim}
+31 passed, 3 warnings in 114.04s (0:01:54)
+\end{verbatim}
+
+{\sloppy
+\textbf{Discussion.} All 31 tests across \texttt{test\_metrics.py} (BSS
+Eval wrapper correctness), \texttt{test\_split.py} (leakage-safety of the
+fold assignment), and \texttt{test\_load\_dataset.py} (closed-form and
+real-data checks on the additive-triplet audit) pass. The 3 warnings are
+third-party \texttt{DeprecationWarning}s from \texttt{audioread}'s use of
+three deprecated Python standard-library modules (\texttt{aifc},
+\texttt{audioop}, \texttt{sunau}), unrelated to this project's code. This
+is the evidence that the numbers in Sections~\ref{sec:evalharness}
+and~\ref{sec:baselines} are at least \emph{computed correctly} (metrics
+match a direct \texttt{mir\_eval} call, no held-out recording leaks into
+any fold's dictionary pool) --- it says nothing about whether the dataset
+those numbers are computed \emph{on} is correct (Section~1's caveat still
+applies).
+\par}
+
+% ============================================================
+\section{Stage 5: Dataset Statistics (\texttt{make stats})}
+% ============================================================
+
+\begin{verbatim}
+Scanned 535 audio files
+  Sample rate(s): [4000] Hz      Channel count(s): [1]
+  Duration: mean=15.00s min=15.00s max=15.00s
+  Clipped files: 36 (6.7%)
+\end{verbatim}
+
+Per-class and per-location breakdown (isolated \texttt{HS.csv}/\texttt{LS.csv}
+recordings only; duration and sample rate are constant everywhere, so
+omitted below):
+
+\begin{table}[H]
+\centering
+\caption{Per-class counts, all with 0 clipped files.}
+\begin{tabular}{@{}lc@{\hspace{1.5em}}lc@{}}
+\toprule
+Heart class & $n$ & Lung class & $n$ \\
+\midrule
+Normal                & 9 & Normal          & 12 \\
+Mid Systolic Murmur    & 7 & Coarse Crackles & 9  \\
+Late Diastolic Murmur  & 6 & Pleural Rub     & 9  \\
+Early Systolic Murmur  & 6 & Rhonchi         & 8  \\
+Late Systolic Murmur   & 5 & Wheezing        & 7  \\
+S3                     & 5 & Fine Crackles   & 5  \\
+Atrial Fibrillation    & 4 & & \\
+AV Block               & 3 & & \\
+Tachycardia            & 3 & & \\
+S4                     & 2 & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Discussion.} This output is discussed at length in
+\texttt{report.tex} \S2.2.1 (why it is trustworthy, and the class-imbalance
+caveat it surfaces for the planned classification stage --- S4 at $n{=}2$
+cannot appear in every fold's training set). The one point worth repeating
+here: every class and every location shows \emph{zero} clipped files,
+which is the finer-grained confirmation that the 36 clipped files counted
+above are entirely confined to \texttt{Mix.csv}'s mixed component --- the
+same 36 rows the additive-triplet audit (Section~1) independently flags as
+valid, i.e.\ the clipping is a normalization fingerprint of a real
+heart+lung summation, not a defect scattered across the dataset.
+
+% ============================================================
+\section{Stage 6: Visualization (\texttt{make plots})}
+% ============================================================
+
+\begin{verbatim}
+Wrote 4 figures to src/visualization/plots/
+\end{verbatim}
+
+{\sloppy
+\textbf{Discussion.} The four visualization scripts ---
+\texttt{audio\_plotter}, \texttt{audio\_spectrogram}, \texttt{donut\_chart},
+\texttt{plot\_per\_class} --- all ran without error under
+\texttt{MPLBACKEND=Agg} (headless). This stage produces gitignored PNGs
+consumed visually, not numbers to discuss --- included here only to record
+that it completed as part of this run.
+\par}
+
+% ============================================================
+\section{Stage 7: Separation Baselines (\texttt{make baselines})}
+\label{sec:baselines}
+% ============================================================
+
+The slow stage (per-fold NMF dictionary fitting), and the one that produces
+this run's headline result. Both baselines are run on both the full 145-row
+set and the 36-row additive-valid subset. \textbf{The two row sets use
+independently computed fold assignments} (\texttt{eval\_harness.py}'s
+\texttt{mix\_df} parameter reassigns folds within whatever subset it is
+given), so ``fold 0'' under the full set and ``fold 0'' under the valid
+subset are \emph{not} the same rows --- only Baseline~1 and Baseline~2
+\emph{within the same row set} share fold identity (same seed, same
+\texttt{mix\_df}), and only those pairs are safe to compare fold-by-fold
+below.
+
+\subsection{Baseline 1 (bandpass): full 145 rows}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 1, full 145 rows, per fold.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Heart} & \multicolumn{3}{c}{Lung} \\
+Fold & SDR & SIR & SAR & SDR & SIR & SAR \\
+\midrule
+0 & $-13.85$ & $4.30$ & $-9.86$  & $-15.25$ & $1.73$ & $-11.40$ \\
+1 & $-13.93$ & $2.36$ & $-9.12$  & $-14.15$ & $1.85$ & $-9.51$ \\
+2 & $-10.74$ & $5.44$ & $-6.23$  & $-12.45$ & $2.15$ & $-8.18$ \\
+3 & $-11.69$ & $4.61$ & $-7.33$  & $-14.33$ & $1.49$ & $-9.48$ \\
+4 & $-13.04$ & $3.61$ & $-7.95$  & $-12.96$ & $1.43$ & $-7.79$ \\
+\midrule
+Mean $\pm$ std & $-12.65\pm1.40$ & $4.07\pm1.16$ & $-8.10\pm1.44$ & $-13.83\pm1.12$ & $1.73\pm0.29$ & $-9.27\pm1.42$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 1, full 145 rows, pooled row-level statistics.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{SDR} & \multicolumn{2}{c}{SIR} & \multicolumn{2}{c}{SAR} \\
+Source & mean & median & mean & median & mean & median \\
+\midrule
+Heart & $-12.69$ & $-18.39$ & $4.06$ & $3.61$ & $-8.15$ & $-16.52$ \\
+Lung  & $-13.87$ & $-19.19$ & $1.73$ & $1.70$ & $-9.33$ & $-16.01$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline 1 (bandpass): 36-row additive-valid subset}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 1, 36-row valid subset, per fold.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Heart} & \multicolumn{3}{c}{Lung} \\
+Fold & SDR & SIR & SAR & SDR & SIR & SAR \\
+\midrule
+0 & $0.38$ & $1.21$ & $13.04$  & $7.96$  & $9.42$  & $16.79$ \\
+1 & $8.67$ & $9.83$ & $20.86$  & $4.28$  & $6.55$  & $10.53$ \\
+2 & $8.19$ & $8.74$ & $18.97$  & $4.30$  & $6.24$  & $10.47$ \\
+3 & $3.09$ & $3.75$ & $16.94$  & $5.01$  & $6.39$  & $13.04$ \\
+4 & $7.70$ & $8.70$ & $18.17$  & $-1.83$ & $-0.49$ & $10.61$ \\
+\midrule
+Mean $\pm$ std & $5.61\pm3.68$ & $6.45\pm3.76$ & $17.60\pm2.92$ & $3.94\pm3.57$ & $5.62\pm3.66$ & $12.29\pm2.74$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 1, 36-row valid subset, pooled row-level statistics.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{SDR} & \multicolumn{2}{c}{SIR} & \multicolumn{2}{c}{SAR} \\
+Source & mean & median & mean & median & mean & median \\
+\midrule
+Heart & $5.46$ & $5.18$ & $6.30$ & $5.78$ & $17.47$ & $19.13$ \\
+Lung  & $4.05$ & $5.05$ & $5.73$ & $5.85$ & $12.42$ & $12.85$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline 2 (supervised NMF): full 145 rows}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 2, full 145 rows, per fold.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Heart} & \multicolumn{3}{c}{Lung} \\
+Fold & SDR & SIR & SAR & SDR & SIR & SAR \\
+\midrule
+0 & $-13.76$ & $4.16$ & $-10.93$ & $-16.57$ & $-0.02$ & $-11.19$ \\
+1 & $-14.29$ & $1.78$ & $-9.91$  & $-15.41$ & $0.84$  & $-10.08$ \\
+2 & $-10.92$ & $6.13$ & $-8.55$  & $-14.68$ & $-0.53$ & $-7.66$ \\
+3 & $-12.47$ & $5.15$ & $-9.33$  & $-14.82$ & $0.52$  & $-8.98$ \\
+4 & $-12.64$ & $3.89$ & $-9.18$  & $-13.95$ & $0.77$  & $-8.27$ \\
+\midrule
+Mean $\pm$ std & $-12.82\pm1.31$ & $4.22\pm1.63$ & $-9.58\pm0.90$ & $-15.09\pm0.98$ & $0.32\pm0.58$ & $-9.23\pm1.42$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 2, full 145 rows, pooled row-level statistics.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{SDR} & \multicolumn{2}{c}{SIR} & \multicolumn{2}{c}{SAR} \\
+Source & mean & median & mean & median & mean & median \\
+\midrule
+Heart & $-12.85$ & $-17.76$ & $4.20$ & $3.07$ & $-9.62$ & $-16.10$ \\
+Lung  & $-15.13$ & $-19.21$ & $0.31$ & $0.63$ & $-9.29$ & $-16.19$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline 2 (supervised NMF): 36-row additive-valid subset}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 2, 36-row valid subset, per fold.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{3}{c}{Heart} & \multicolumn{3}{c}{Lung} \\
+Fold & SDR & SIR & SAR & SDR & SIR & SAR \\
+\midrule
+0 & $-0.56$ & $1.86$  & $8.23$  & $4.72$  & $6.01$  & $14.05$ \\
+1 & $5.87$  & $11.10$ & $10.93$ & $-1.75$ & $-0.96$ & $12.29$ \\
+2 & $6.79$  & $10.96$ & $9.81$  & $-1.58$ & $-1.09$ & $12.49$ \\
+3 & $1.44$  & $3.08$  & $10.63$ & $1.75$  & $2.70$  & $13.68$ \\
+4 & $5.36$  & $9.72$  & $9.22$  & $-5.33$ & $-4.89$ & $12.58$ \\
+\midrule
+Mean $\pm$ std & $3.78\pm3.17$ & $7.34\pm4.50$ & $9.77\pm1.09$ & $-0.44\pm3.82$ & $0.35\pm4.15$ & $13.02\pm0.79$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Baseline 2, 36-row valid subset, pooled row-level statistics.}
+\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{SDR} & \multicolumn{2}{c}{SIR} & \multicolumn{2}{c}{SAR} \\
+Source & mean & median & mean & median & mean & median \\
+\midrule
+Heart & $3.66$ & $5.66$ & $7.19$ & $8.66$ & $9.72$ & $9.21$ \\
+Lung  & $-0.29$ & $1.34$ & $0.51$ & $1.84$ & $13.05$ & $13.16$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Cross-baseline fold correlation}
+\label{sec:foldcorr}
+
+Because Baseline~1 and Baseline~2 use the same fold assignment within each
+row set (Section~\ref{sec:baselines}), their per-fold numbers are directly
+comparable fold-by-fold. Ranking the full-145 folds by heart SDR:
+
+\begin{itemize}
+  \item Baseline 1: fold 2 (best) $>$ fold 3 $>$ fold 4 $>$ fold 0 $>$ fold 1 (worst)
+  \item Baseline 2: fold 2 (best) $>$ fold 3 $>$ fold 4 $>$ fold 0 $>$ fold 1 (worst)
+\end{itemize}
+
+\noindent The order is \emph{identical}. The same comparison on the 36-row
+valid subset:
+
+\begin{itemize}
+  \item Baseline 1: fold 1 (best) $>$ fold 2 $>$ fold 4 $>$ fold 3 $>$ fold 0 (worst)
+  \item Baseline 2: fold 2 (best) $>$ fold 1 $>$ fold 4 $>$ fold 3 $>$ fold 0 (worst)
+\end{itemize}
+
+\noindent Folds 1 and 2 swap at the top, but fold 0 is worst and fold 3 is
+second-worst in both. Lung SDR shows the same qualitative pattern with
+fold~0 worst in three of the four method/row-set combinations
+(the exception is Baseline~2 on the full set, where fold~0 is worst by an
+even larger margin).
+
+\textbf{Discussion.} With only 5 folds this is not a statistically rigorous
+claim, but the consistency is striking: \emph{which fold a row lands in}
+predicts separation quality about as well as \emph{which of the two methods}
+processed it. The most direct explanation is that folds differ in how many
+genuinely additive rows they contain (Section~1) and/or in which heart/lung
+classes dominate them, and that this per-fold composition effect is larger
+than the gap between a zero-training filter and a fitted NMF dictionary.
+This is a caution for any future baseline comparison on this dataset: a
+single fold's number is not informative about method quality on its own,
+and a new method should be checked for the same cross-fold ranking pattern
+before its aggregate score is trusted.
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+% ============================================================
+
+Pulling the seven stages together:
+
+\begin{enumerate}
+  \item \textbf{The pipeline itself is healthy.} All 10 \texttt{make all}
+    targets completed without error, all 31 tests pass, and the harness's
+    plumbing smoke test (Section~\ref{sec:evalharness}) confirms the fold
+    $\to$ fit $\to$ score $\to$ aggregate path works correctly end-to-end.
+    Nothing in this run indicates a code-level bug.
+  \item \textbf{The dataset is not yet trustworthy.} 109 of 145 mixture rows
+    have no genuine heart+lung structure to separate (Section~1), and the
+    sample rate itself is off by 5.5$\times$ from the documented value ---
+    both symptoms of sourcing this working copy from GitHub instead of
+    Mendeley. Every quantitative result below the dataset caveat is
+    provisional.
+  \item \textbf{Restricting to genuinely valid rows changes the story, not
+    just the scale.} SDR jumps 15--18\,dB once the 109 invalid rows are
+    excluded (Section~\ref{sec:baselines}) --- expected, since those rows
+    have nothing coherent to separate --- but more importantly, the
+    \emph{ranking} of the two baselines flips from a near-tie (full set) to
+    a clear, consistent win for the zero-training bandpass filter over
+    learned NMF (valid subset). A comparison run only on the full,
+    mostly-invalid set would have reported the wrong qualitative
+    conclusion, not just a noisier version of the right one.
+  \item \textbf{Fold composition is a bigger effect than it looks.}
+    Section~\ref{sec:foldcorr}'s fold-ranking agreement between two
+    unrelated separation methods suggests a meaningful share of the
+    fold-to-fold variance reported as ``std'' in \texttt{report.tex}'s
+    aggregate tables reflects which rows are in each fold, not method
+    instability. This does not change any reported number, but it does
+    change how those numbers should be read: as method comparisons that are
+    only as reliable as the row composition they share, not as independent
+    per-fold measurements of method quality.
+\end{enumerate}
+
+% ============================================================
+\section{Next Steps}
+% ============================================================
+
+\begin{itemize}
+  \item Re-download HLS-CMDS from Mendeley and re-run this exact pipeline
+    on the correct copy --- the blocking action item carried over from
+    \texttt{report.tex}'s Limitations section.
+  \item Re-run Section~\ref{sec:foldcorr}'s fold-ranking check on the
+    Mendeley copy once the split changes, to see whether the
+    composition-dominates-method pattern is a property of this specific
+    (small, imbalanced) row set or persists more generally.
+  \item Feed this run's per-class counts (Section~5) into the classification
+    stage design (\texttt{PROTOCOL.md} \S5.3) before it is built, given the
+    S4/AV Block/Tachycardia class-size caveat already flagged in
+    \texttt{report.tex}.
+\end{itemize}
+
+\end{document}

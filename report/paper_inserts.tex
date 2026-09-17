@@ -1,0 +1,415 @@
+% ---------------------------------------------------------------------------
+% paper_inserts.tex -- every [INSERT: ...] block for the paper, in order,
+% as paste-ready LaTeX. Numbers are copied from report.tex (revised
+% 2026-09-13) and from results/*.html produced on 2026-09-13; each block
+% names its source so a value can be traced.
+%
+% Conventions: booktabs; wide tables are table* (two-column span) for an
+% IEEE two-column layout -- switch to table if the target is single-column.
+% Figure paths are relative to report/; copy the PNGs next to the paper.
+% Labels are prefixed "pi:" so they cannot collide with the paper's own.
+%
+% MERGE CHECKLIST (do in this order, so no superseded table survives):
+%   1. Paste each block below over the corresponding table/figure/paragraph
+%      of the full draft -- every one of them supersedes its predecessor:
+%        leak-group table (13 -> 14 singletons; sums to 145 rows / 29 groups)
+%        Condition A table (post level-normalisation: 60.0 / 62.0 %)
+%        Condition B table (both deltas, pooled and fold-paired, defined)
+%        knee tables x2, curve figure x2, Pareto figure
+%        Discussion paragraphs x2, closing, level-normalisation paragraph
+%        NEW: bootstrap table (pi:kneeboot) + its paragraph; BH/Holm note in
+%             the Condition B caption and the Yaqub paragraph
+%   2. Check the merged draft with the same arithmetic the reviewer used:
+%        leak-group sizes x counts == 145, groups == 29;
+%        Table VIII: 52.8 - Acc == Delta_pooled for every row;
+%        Condition A vs Condition B isolated: 60.0 (50 rec.) vs 52.8 (36 rows)
+%        is by design -- both captions now say so.
+%   3. Only then delete the old "Draft verification note" entries
+%      (Table X / Table III of the previous draft). Both issues they flagged
+%      are fixed at the source (split.py transcription; condition_b.py now
+%      emits both deltas), so the notes have nothing left to warn about.
+% ---------------------------------------------------------------------------
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\begin{document}
+\title{Paper inserts (preview build)}
+\author{}
+\maketitle
+
+% ===========================================================================
+\section*{0. Wording (no new numbers) -- title, abstract, claims}
+% ===========================================================================
+% These replace phrasings the review flagged as over-claiming. Paste-ready.
+\paragraph{Title (pick one)}
+\emph{Controlled SDR--Accuracy Trajectories for Cardiorespiratory Source Separation: a Leakage-Safe Evaluation on HLS-CMDS}
+\quad or \quad
+\emph{An Interpolation-Based SDR--Accuracy Analysis for Cardiorespiratory Source Separation}.
+
+\paragraph{Abstract sentence for the sweep}
+We construct controlled interpolation trajectories between each separator's output and its matched ground-truth reference, $d(\alpha) = (1-\alpha)\,g + \alpha\,s$, solving for the $\alpha$ that attains each target SDR exactly, and classify every point with weights trained only on isolated recordings.
+
+\paragraph{How to state a crossing}
+Not ``the knee occurs at 17.8\,dB'' but: \emph{the raw-mixture crossing estimated from adjacent sampled points was 17.8\,dB under the specified interpolation protocol (bootstrap 95\% interval 8.2\,dB to not identifiable within the 25\,dB grid; 69\% of resamples cross).} Where fewer than half of the resamples cross, write \emph{crossing unstable across bootstrap resamples} and give $P$(crossed) rather than a value.
+
+\paragraph{The 3-dB criterion}
+Not ``No baseline meets the 3\,dB cross-architecture knee-agreement criterion'' but: \emph{Under the study's 3-dB operational agreement criterion --- a working threshold chosen for this analysis, not a standard --- no baseline showed cross-architecture agreement.} (Use ``prespecified'' only if the threshold was fixed before the curves were seen.)
+
+\paragraph{The 109 rows}
+Not ``invalid'' / ``corrupted'' / ``wrong'' but: \emph{rows that fail the tested additive-reference correspondence}, or \emph{non-additive under the named-reference test}, or \emph{excluded from reference-based scoring under the strict additive model}. The sensitivity paragraph (Sec.~IV insert below) is what licenses excluding them.
+
+\paragraph{Related-work tone}
+Replace ``with the ground truth in hand and plotted on the page, and no number computed from it'' with \emph{Although a matched reference was shown qualitatively, the study did not report a quantitative separation metric.} Replace ``one that measures decibels and stops, one that measures accuracy and stops, and a third that measures neither'' with \emph{Prior work has tended to report separation quality and downstream performance separately, while some application-oriented studies report neither quantity explicitly.}
+
+\paragraph{Citation}
+A reference reading ``Same as \ldots'' is a formatting error: cite the NMF recipe's primary source once, where the recipe is described, and delete the placeholder.
+
+% ===========================================================================
+\section*{IV. Method / Setup inserts}
+% ===========================================================================
+
+% ---- INSERT: Table -- additive-triplet audit result --------------------------
+% Source: report.tex tab:additivesubset; load_dataset.verify_additive_triplets()
+\begin{table}[htbp]
+\centering
+\caption{Additive-triplet audit of \texttt{Mix.csv} (HLS-CMDS, Mendeley v3; byte-identical to the release). A row is additive when $\|m - a\,(h+l)\|/\|m\| < 10^{-3}$ for the least-squares gain $a$; the residual is bimodal ($\sim10^{-8}$--$10^{-4}$ vs.\ $\sim1$), so the threshold is not load-bearing.}
+\label{pi:additive}
+\footnotesize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & Rows & \% of 145 \\
+\midrule
+Additive, $m \approx a\,(h+l)$ & 36 & 24.8 \\
+Not additive (unrelated to named sources) & 109 & 75.2 \\
+\midrule
+Total & 145 & 100 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Paragraph -- additive-audit sensitivity (goes right after the audit table) ----
+% Source: results/additive_audit_sensitivity_report.html (additive_audit_sensitivity.py)
+\paragraph{Sensitivity of the additive verdict}
+The one-gain, zero-lag fit was relaxed in every way a reviewer would ask: mean removed before fitting; gain allowed negative (52 rows choose one; none passes); the summed reference shifted by the cross-correlation-optimal lag within $\pm100$ samples; separate gains per source; separate gains with separate per-source lags. Under all seven models the count at $10^{-3}$ is 36, with no row changing verdict. The passing cluster's residuals span $0.9$--$4.5\times10^{-4}$ and the failing cluster's $0.94$--$1.0$ even under the loosest model, a gap of more than $2000\times$; thresholds $10^{-2}$ and $10^{-3}$ select the same 36 rows, while $10^{-4}$ admits only 3 because 16-bit quantisation alone puts a $\sim10^{-4}$ floor on any additive row. The optimal lag is 0 for all 36 passing rows and spread to the $\pm100$-sample edge for the 109 failing ones, as cross-correlating unrelated signals produces. All files read 4000\,Hz. The 109 rows are not near-misses of the additive model; their mixture shares no energy with the two recordings named alongside it.
+
+% ---- INSERT: Table -- leak-group size distribution + 5-fold split ------------
+% Source: report.tex tab:leakgroups + tab:foldsizes; split.py, seed 0
+\begin{table}[htbp]
+\centering
+\caption{Recording reuse and the leakage-safe split. Top: leak-group sizes over the 145 mixture rows (29 groups, sizes summing to 145; a group is a connected component of rows sharing a heart or lung recording by content hash). Bottom: the 5-fold split (seed 0), greedy largest-group-to-smallest-fold, and the isolated-recording pool left for dictionary/model fitting once every recording reused in the held-out fold is removed.}
+\label{pi:split}
+\footnotesize
+\begin{tabular}{@{}lcccccccccc@{}}
+\toprule
+Group size & 32 & 22 & 19 & 13 & 11 & 9 & 4 & 3 & 2 & 1 \\
+\# groups & 1 & 1 & 1 & 1 & 1 & 1 & 2 & 3 & 4 & 14 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.6em}
+\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Fold & Eval rows /145 & HS pool /50 & LS pool /50 \\
+\midrule
+0 & 32 & 44 & 46 \\
+1 & 29 & 43 & 46 \\
+2 & 28 & 44 & 47 \\
+3 & 28 & 40 & 43 \\
+4 & 28 & 47 & 38 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Table -- metrics validation -------------------------------------
+% Source: report.tex tab:synthtests; src/test/test_metrics.py
+\begin{table}[htbp]
+\centering
+\caption{Validation of the BSS Eval wrapper against constructions with analytically known scores (\texttt{test\_metrics.py}). $s$ is the reference, $n$ white noise, $\alpha s_k$ a leak of the other source.}
+\label{pi:metricsval}
+\footnotesize
+\begin{tabular}{@{}llcc@{}}
+\toprule
+Construction & Target (dB) & Tol.\ & Measured \\
+\midrule
+$\hat s = s$ & all three $\to\infty$ & $>100$\,dB & $>300$\,dB \\
+$\hat s = s + n$, SNR 20\,dB & SDR $\approx$ SAR $\approx 20$ & $\pm1$\,dB & pass \\
+$\hat s = s + n$, SNR 6\,dB & SDR $\approx$ SAR $\approx 6$ & $\pm1$\,dB & pass \\
+$\hat s_j = s_j + 0.1\,s_k$ & SIR $= 20$ & $\pm1$\,dB & pass \\
+$\hat s_j = s_j + 0.3\,s_k$ & SIR $= 10.46$ & $\pm1$\,dB & pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Table -- Condition A, both architectures + confusion summary ----
+% Source: results/heart_classifier_report.html (Arch 1), results/heart_classifier_cnn_report.html (Arch 2, 2026-09-13, tuned)
+\begin{table}[htbp]
+\centering
+\caption{Condition A: isolated heart-sound classification on the 50 \texttt{HS.csv} recordings, four classes (Normal / Murmur / Extra Sound / Rhythm Disorder), same leak-group folds as the separation baselines, 5-fold CV, mean $\pm$ 95\% CI over folds. Both classifiers operate on unit-RMS-normalised waveforms (see text). Recall per class is pooled over every fold's held-out predictions. These accuracies are not the ``isolated'' row of Table~\ref{pi:conditionB}: that row scores the same per-fold classifiers on the 36 native-additive mixtures' own heart references, a different and smaller set, so the two numbers differ by design ($60.0\%$ on 50 recordings vs.\ $52.8\%$ on 36 rows for Architecture~1).}
+\label{pi:conditionA}
+\footnotesize
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & MFCC + SVM & log-Mel + CNN \\
+\midrule
+Accuracy & $60.0 \pm 10.7\%$ & $62.0 \pm 3.9\%$ \\
+Macro-F1 & $0.43 \pm 0.12$ & $0.54 \pm 0.11$ \\
+\midrule
+Recall: Normal ($n{=}9$) & 44\% & 67\% \\
+Recall: Murmur ($n{=}24$) & 92\% & 71\% \\
+Recall: Extra Sound ($n{=}7$) & 29\% & 71\% \\
+Recall: Rhythm Disorder ($n{=}10$) & 20\% & 30\% \\
+Main confusion & minority $\to$ Murmur & Rhythm D.\ $\to$ Normal \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Paragraph -- level normalisation (methods; new after the Condition B audit) ----
+% Source: heart_classifier.level_normalize docstring; report.tex sec:conditionb "A confound found in the first run"
+\paragraph{Level normalisation}
+Both classifiers scale every waveform to unit RMS before feature extraction. This was added after the first Condition~B run returned identical predictions for three unrelated separators (bandpass, MSSA, Conv-TasNet): the isolated training recordings span $0.0005$--$0.013$ RMS, while every separator's output inherits the mixture's peak-normalising gain and sits at $0.03$--$0.09$ RMS, $20$--$25\times$ louder. Since MFCC$_0$ is log-energy, separated inputs fell at a standardised distance of $11$--$15$ from the training cloud (whose farthest point is at $7.4$), where an RBF kernel is $\approx 0$ for every support vector and the SVM's decision function is a per-fold constant. Level normalisation removes that confound and nothing else; after it, separated inputs still lie outside the training cloud (distance $8$--$13$), but on the spectral-shape coefficients MFCC$_1$--MFCC$_4$, which is the separation distortion Condition~B is meant to measure. All Condition~A/B and knee-point figures in this paper are from the level-normalised classifiers.
+
+% ===========================================================================
+\section*{V. Results inserts}
+% ===========================================================================
+
+% ---- A. Separation quality ----------------------------------------------------
+% ---- INSERT: Table -- native valid subset, six baselines, SDR/SIR/SAR ---------
+% Source: results/canonical_summary.csv (canonical_rows.py) -- the ONE row-level file; same audio as Condition B / knee.
+% Replaces the old Table VII: its B2 row (3.78/-0.44) predated the hop/denoise corrections and its B6 row (5.15)
+% was a separate GPU training run; B1's 5.61 vs 5.46 was fold-mean vs pooled of the same run.
+\begin{table*}[htbp]
+\centering
+\caption{Separation quality on the 36-row native additive subset, leakage-safe 5-fold CV, computed from one row-level file (\texttt{canonical\_rows.csv}) whose cached separated waveforms are also the exact audio the classification experiments consume. SDR is given under both conventions --- across-fold mean of per-fold means $\pm$ std over the five folds (8/7/7/7/7 rows), and pooled mean over the 36 rows $\pm$ 95\% $t$-interval; SIR and SAR are pooled means. Baseline~0 scores the raw mixture as both estimates.}
+\label{pi:native}
+\small
+\begin{tabular}{@{}lcccc@{\hspace{1.5em}}cccc@{}}
+\toprule
+ & \multicolumn{4}{c}{Heart} & \multicolumn{4}{c}{Lung} \\
+\cmidrule(lr){2-5}\cmidrule(lr){6-9}
+Method & SDR fold mean & SDR pooled & SIR & SAR & SDR fold mean & SDR pooled & SIR & SAR \\
+\midrule
+B0 raw mixture     & $2.65 \pm 4.34$ & $2.48 \pm 2.79$ & $2.48$ & $74.6$ & $-2.14 \pm 4.19$ & $-1.98 \pm 2.66$ & $-1.98$ & $74.6$ \\
+B1 bandpass        & $5.61 \pm 3.68$ & $5.46 \pm 2.66$ & $6.30$ & $17.47$ & $3.94 \pm 3.57$ & $4.05 \pm 2.37$ & $5.73$ & $12.42$ \\
+B2 supervised NMF  & $2.69 \pm 2.96$ & $2.58 \pm 1.87$ & $7.27$ & $7.58$ & $0.62 \pm 3.14$ & $0.71 \pm 2.34$ & $2.36$ & $9.93$ \\
+B3 standard NMF    & $3.44 \pm 2.02$ & $3.35 \pm 1.88$ & $6.97$ & $9.37$ & $2.22 \pm 3.91$ & $2.31 \pm 2.81$ & $5.02$ & $9.66$ \\
+B4 MSSA            & $5.17 \pm 4.05$ & $5.02 \pm 2.91$ & $5.73$ & $18.81$ & $5.32 \pm 3.20$ & $5.39 \pm 1.87$ & $8.58$ & $12.18$ \\
+B5 EVMD            & $3.73 \pm 3.43$ & $3.61 \pm 2.35$ & $4.99$ & $13.99$ & $0.36 \pm 3.39$ & $0.50 \pm 2.44$ & $1.40$ & $13.56$ \\
+B6 Conv-TasNet-lite & $5.19 \pm 4.14$ & $5.02 \pm 2.77$ & $6.28$ & $16.45$ & $2.05 \pm 3.20$ & $2.13 \pm 2.21$ & $4.77$ & $9.07$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- INSERT: Table -- synthetic substrate vs native subset side by side ------
+% Source: report.tex tab:sixmethodsynth (n=1500; B5 n=75) and tab:sixmethodnative / tab:baselinevalid (n=36)
+\begin{table*}[htbp]
+\centering
+\caption{Heart and lung SDR (dB, across-fold mean $\pm$ std) on the two substrates. Synthetic: 1500 combinatorial mixtures (500 leakage-safe heart/lung pairs $\times$ additive noise at $-5$, $15$ and $35$\,dB SNR), gains fitted from the native rows, own leakage-safe split (Baseline~5 on a 75-row subsample). Native: the 36 additive rows, pooled mean $\pm$ 95\% CI from \texttt{canonical\_rows.csv}.}
+\label{pi:substrates}
+\begin{tabular}{@{}lcc@{\hspace{2em}}cc@{}}
+\toprule
+ & \multicolumn{2}{c}{Synthetic ($n{=}1500$)} & \multicolumn{2}{c}{Native additive ($n{=}36$)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Method & Heart SDR & Lung SDR & Heart SDR & Lung SDR \\
+\midrule
+B1 bandpass        & $2.10 \pm 0.43$  & $-1.24 \pm 0.44$ & $5.46 \pm 2.66$ & $4.05 \pm 2.37$ \\
+B2 supervised NMF  & $-0.70 \pm 0.40$ & $-3.73 \pm 0.40$ & $2.58 \pm 1.87$ & $0.71 \pm 2.34$ \\
+B3 standard NMF    & $-0.00 \pm 0.43$ & $-3.53 \pm 0.46$ & $3.35 \pm 1.88$ & $2.31 \pm 2.81$ \\
+B4 MSSA            & $1.59 \pm 0.47$  & $-1.60 \pm 0.50$ & $5.02 \pm 2.91$ & $5.39 \pm 1.87$ \\
+B5 EVMD ($n{=}75$)  & $2.42 \pm 1.70$  & $-2.99 \pm 2.25$ & $3.61 \pm 2.35$ & $0.50 \pm 2.44$ \\
+B6 Conv-TasNet-lite & $3.16 \pm 0.40$ & $0.37 \pm 0.35$  & $5.02 \pm 2.77$ & $2.13 \pm 2.21$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- INSERT: Table -- Baseline 6 training diagnostics ------------------------
+% Source: report.tex tab:b6diag
+\begin{table}[htbp]
+\centering
+\caption{Conv-TasNet-lite (325{,}465 parameters) training per synthetic-set fold: 25 epochs $\times$ 40 steps, batch 8, SI-SDR loss, LR halved after 4 epochs without validation improvement (never triggered).}
+\label{pi:b6diag}
+\begin{tabular}{@{}cccc@{}}
+\toprule
+Fold & Epochs & Best val.\ SI-SDR (dB) & Fit time (s, GPU) \\
+\midrule
+0 & 25 & 0.78 & 27.1 \\
+1 & 25 & 1.78 & 26.2 \\
+2 & 25 & 2.65 & 26.2 \\
+3 & 25 & 3.35 & 26.3 \\
+4 & 25 & 1.68 & 26.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- B. Classification: isolated vs separated ----------------------------------
+% ---- INSERT: Table -- Condition B --------------------------------------------
+% Source: results/condition_b_stats.csv (condition_b_stats.py: 5000 leak-group cluster-bootstrap replicates, 20000 sign-flip permutations)
+\begin{table*}[htbp]
+\centering
+\caption{Condition B: the Condition-A classifiers (same per-fold weights) on isolated ground truth, on the raw mixture, and on each baseline's real separated heart output, 36 native additive rows. Accuracy is pooled over the rows; every interval is a 95\% percentile interval from 5000 cluster-bootstrap replicates over the 24 leak groups the rows fall into. $\Delta$ = isolated $-$ separated, paired by row; $\Delta_{\rm raw}$ = separated $-$ raw mixture. $p$ is a leak-group sign-flip permutation test on $\Delta$ (appendix-grade; the intervals carry the claim). SDR is the method's pooled heart output (Table~\ref{pi:native}).}
+\label{pi:conditionB}
+\small
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+Arch.\ & Input & Accuracy [95\% CI] & Macro-F1 & SDR & $\Delta$ vs.\ isolated [95\% CI] & $p$ & $\Delta_{\rm raw}$ [95\% CI] \\
+\midrule
+1 & Isolated (ground truth) & 52.8 [35.3, 70.0] & 0.51 & --- & --- & --- & --- \\
+1 & Raw mixture             & 38.9 [24.1, 53.1] & --- & 2.48 & $+13.9$ [0.0, 29.0] & 0.12 & --- \\
+1 & B1 bandpass        & 30.6 [14.3, 45.2] & 0.18 & 5.46 & $+22.2$ [2.5, 45.2] & 0.075 & $-8.3$ [$-28.6$, 8.1] \\
+1 & B2 supervised NMF  & 41.7 [24.3, 57.9] & 0.26 & 2.58 & $+11.1$ [$-8.6$, 33.3] & 0.43 & $+2.8$ [$-17.1$, 20.0] \\
+1 & B3 standard NMF    & 27.8 [14.3, 39.5] & 0.26 & 3.35 & $+25.0$ [11.6, 41.9] & 0.004 & $-11.1$ [$-24.1$, $-2.4$] \\
+1 & B4 MSSA            & 36.1 [19.4, 51.2] & 0.21 & 5.02 & $+16.7$ [$-2.4$, 38.9] & 0.18 & $-2.8$ [$-20.6$, 11.4] \\
+1 & B5 EVMD            & 27.8 [10.7, 43.2] & 0.17 & 3.61 & $+25.0$ [3.2, 48.6] & 0.062 & $-11.1$ [$-32.4$, 7.4] \\
+1 & B6 Conv-TasNet-lite & 36.1 [21.2, 51.4] & 0.33 & 5.02 & $+16.7$ [$-2.6$, 38.2] & 0.19 & $-2.8$ [$-23.5$, 16.2] \\
+\addlinespace
+2 & Isolated (ground truth) & 52.8 [34.3, 69.2] & --- & --- & --- & --- & --- \\
+2 & Raw mixture             & 33.3 [17.9, 50.0] & --- & 2.48 & $+19.4$ [$-2.7$, 38.9] & 0.15 & --- \\
+2 & B1 bandpass        & 16.7 [3.1, 30.6] & --- & 5.46 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B2 supervised NMF  & 44.4 [29.0, 57.6] & --- & 2.58 & $+8.3$ [$-10.5$, 25.0] & 0.56 & $+11.1$ [$-6.9$, 27.8] \\
+2 & B3 standard NMF    & 27.8 [11.8, 44.4] & --- & 3.35 & $+25.0$ [7.4, 40.5] & 0.031 & $-5.6$ [$-22.9$, 12.1] \\
+2 & B4 MSSA            & 16.7 [3.1, 30.6] & --- & 5.02 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B5 EVMD            & 16.7 [3.1, 30.6] & --- & 3.61 & $+36.1$ [19.4, 52.8] & 0.003 & $-16.7$ [$-34.5$, $-2.6$] \\
+2 & B6 Conv-TasNet-lite & 36.1 [19.4, 52.9] & --- & 5.02 & $+16.7$ [$-3.4$, 34.4] & 0.22 & $+2.8$ [$-18.4$, 23.5] \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- C. The knee point ---------------------------------------------------------
+% ---- INSERT: Figure -- accuracy-vs-SDR curves ---------------------------------
+% Source: results/plots/sdr_knee_point_curve_heart_classifier.png (Arch 1) and ..._cnn.png (Arch 2)
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=0.49\textwidth]{../results/plots/sdr_knee_point_curve_heart_classifier.png}\hfill
+\includegraphics[width=0.49\textwidth]{../results/plots/sdr_knee_point_curve_heart_classifier_cnn.png}
+\caption{Classification accuracy against measured heart-source SDR for all six baselines, 36 native additive rows per point, seven target-SDR levels per baseline. Left: Architecture~1 (MFCC+SVM); right: Architecture~2 (log-Mel+CNN). Dashed: the same classifier on the raw mixture (38.9\% / 33.3\%); dash-dot: isolated ground truth (52.8\% for both). Dotted verticals mark the raw-mixture crossings. Each trajectory's $\alpha$ values are exact roots of the SDR quadratic under the smallest-root rule; the seven non-monotone Conv-TasNet rows are included under that rule. Each curve's leftmost points sit at that baseline's own real output SDR, because the degradation scheme cannot go below it.}
+\label{pi:kneefig}
+\end{figure*}
+
+% ---- INSERT: Table -- crossing per baseline, Arch 1 ------------------------------
+% Source: results/sdr_knee_point_report.html + results/sdr_knee_bootstrap.csv (exact-root sweep, 2026-09-13)
+\begin{table}[htbp]
+\centering
+\caption{Raw-mixture crossings under Architecture~1: the SDR at which a baseline's trajectory, walking from high to low SDR, crosses the no-separation reference ($38.9\%$), by linear interpolation between the two bracketing sampled points; ``always above'': no sampled point falls below the reference. $P$(crossed) and the interval are from the row bootstrap (Table~\ref{pi:kneeboot}); ``n.i.'' = not identifiable within the 25\,dB grid. Real SDR is the method's pooled output (Table~\ref{pi:native}).}
+\label{pi:knee1}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Baseline & Crossing (dB) & $P$(crossed) & 95\% interval & Real SDR (dB) \\
+\midrule
+B1 bandpass        & 20.1 & 0.71 & [7.3, n.i.] & 5.46 \\
+B2 supervised NMF  & always above & 0.43 & --- & 2.58 \\
+B3 standard NMF    & 15.0 & 0.90 & [5.0, n.i.] & 3.35 \\
+B4 MSSA            & 15.6 & 0.72 & [7.3, n.i.] & 5.02 \\
+B5 EVMD            & 18.2 & 0.85 & [6.1, n.i.] & 3.61 \\
+B6 Conv-TasNet-lite & 4.5 & 0.63 & [3.1, n.i.] & 5.02 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Table -- knee under both architectures ----------------------------
+% Source: results/sdr_knee_point_report.html (2026-09-13)
+\begin{table}[htbp]
+\centering
+\caption{Knee points under both architectures. ``always above'': the curve never drops below that architecture's no-separation reference at any measured SDR (no knee in range). Agreement criterion --- the study's own 3\,dB operational threshold, not a standard --- is both crossings clean and within 3\,dB; met by none.}
+\label{pi:knee2}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Baseline & Arch.\ 1 & Arch.\ 2 & Spread & Agree \\
+\midrule
+B1 bandpass        & 20.1 & 9.3 & 10.7 & no \\
+B2 supervised NMF  & always above & always above & --- & --- \\
+B3 standard NMF    & 15.0 & always above & --- & --- \\
+B4 MSSA            & 15.6 & 9.4 & 6.3 & no \\
+B5 EVMD            & 18.2 & 7.9 & 10.3 & no \\
+B6 Conv-TasNet-lite & 4.5 & always above & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Table -- bootstrap CI for every knee point ---------------------
+% Source: results/sdr_knee_bootstrap.csv (sdr_knee_bootstrap.py, 2000 replicates, seed 0)
+\begin{table*}[htbp]
+\centering
+\caption{Bootstrap uncertainty of the knee points (2000 replicates), resampling the 36 rows i.i.d.\ or the 24 leak groups they fall into. On each replicate the curve, its SDR axis and the no-separation reference are recomputed and the knee found with the same interpolating detector as Table~\ref{pi:knee1}. $P$(crossed) is the fraction of replicates with a clean knee; the interval is the 2.5--97.5 percentile of the knee over those replicates. ``n.i.'' (not identifiable) marks a percentile at the $25$\,dB top of the measured grid.}
+\label{pi:kneeboot}
+\small
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+ & & \multicolumn{2}{c}{Rows ($n{=}36$)} & \multicolumn{2}{c}{Leak groups ($n{=}24$)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Arch.\ & Baseline & $P$(crossed) & Knee median [95\% CI] & $P$(crossed) & Knee median [95\% CI] \\
+\midrule
+1 & B1 bandpass       & 0.71 & 15.4 [7.3, n.i.] & 0.75 & 15.6 [8.5, n.i.] \\
+1 & B2 supervised NMF & 0.43 & 6.2 [3.4, 22.5]  & 0.39 & 5.7 [3.1, 18.7] \\
+1 & B3 standard NMF   & 0.90 & 15.0 [5.0, n.i.] & 0.97 & 15.0 [6.0, 23.8] \\
+1 & B4 MSSA           & 0.72 & 15.4 [7.3, n.i.] & 0.75 & 15.6 [7.3, n.i.] \\
+1 & B5 EVMD           & 0.85 & 18.0 [6.1, n.i.] & 0.92 & 18.1 [7.3, n.i.] \\
+1 & B6 Conv-TasNet    & 0.63 & 18.4 [3.1, n.i.] & 0.65 & 19.0 [2.8, n.i.] \\
+\addlinespace
+2 & B1 bandpass       & 0.95 & 9.5 [4.3, 21.7]  & 0.98 & 9.5 [3.6, 22.5] \\
+2 & B2 supervised NMF & 0.15 & 3.9 [1.7, 22.5]  & 0.15 & 3.8 [1.7, n.i.] \\
+2 & B3 standard NMF   & 0.45 & 4.2 [1.7, 13.7]  & 0.45 & 4.6 [1.7, 14.2] \\
+2 & B4 MSSA           & 0.94 & 9.4 [4.3, 21.7]  & 0.94 & 9.3 [3.5, 23.4] \\
+2 & B5 EVMD           & 0.90 & 8.3 [3.2, 15.2]  & 0.93 & 8.2 [2.5, 15.2] \\
+2 & B6 Conv-TasNet    & 0.27 & 8.2 [2.9, 22.5]  & 0.25 & 8.5 [2.0, 23.3] \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ---- INSERT: Paragraph -- reading the bootstrap (for Sec. V.C) ---------------
+\paragraph{Crossing uncertainty}
+Table~\ref{pi:kneeboot} bootstraps the whole construction. Two things the point estimates cannot show: a crossing is not guaranteed to exist --- for Conv-TasNet under Architecture~1 a third of replicates find none, and for the mask-based methods under Architecture~2 most do not --- and where it exists its interval spans most of the measured range: every Architecture~1 upper percentile sits at the top of the grid (not identifiable), and the tightest interval in the table (EVMD under the CNN) is still $12$\,dB wide. The leak-group bootstrap moves nothing by more than about a decibel, so the rows' dependence is not what limits precision; $n{=}36$ is. What is stable is the grouping: under the CNN, bandpass, MSSA and EVMD cross in $90$--$98\%$ of replicates and supervised NMF in $15\%$, so ``the spectral-stripping methods have a crossing and the mask-based ones do not'' survives resampling even though no individual crossing value does.
+
+% ---- D. Computational cost -----------------------------------------------------
+% ---- INSERT: Table -- MACs and latency -----------------------------------------
+% Source: report.tex tab:macs + results/latency.csv (2026-09-13 idle-machine run; environment in results/latency_environment.csv)
+\begin{table}[htbp]
+\centering
+\caption{Compute cost per 15\,s mixture (60{,}000 samples at 4\,kHz). MACs are exact counts except MSSA and EVMD (estimates). Latency: one untimed warm-up then $n$ timed repetitions ($n{=}5$; 3 for EVMD) on an idle workstation (i9-9900K, 16 threads, load average 0.6; RTX 3060 for Conv-TasNet-lite only; numpy 2.4.6, torch 2.3.1), median wall-clock with p5--p95, and real-time factor ($15\,\text{s}/\text{median}$). A first run at load average 74.6 inflated the CPU-bound methods by $10$--$340\times$ and is retracted.}
+\label{pi:compute}
+\footnotesize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+Method & Params & MACs & Latency (ms) & p5--p95 & RTF \\
+\midrule
+B1 bandpass        & 0        & 2.4\,M  & 3.63 & 3.62--3.70 & 4130 \\
+B2 supervised NMF  & 7{,}710  & 219\,M  & 17.2 & 17.1--22.2 & 873 \\
+B3 standard NMF    & 0        & 1.16\,G & 61.4 & 60.6--61.6 & 244 \\
+B4 MSSA            & 0        & 1.20\,G & 1{,}097 & 1{,}057--1{,}117 & 13.7 \\
+B5 EVMD            & 0        & 5.22\,G & 16{,}812 & 16{,}794--16{,}882 & 0.89 \\
+B6 Conv-TasNet-lite (GPU) & 325{,}465 & 1.96\,G & 16.7 & 16.7--16.7 & 899 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---- INSERT: Figure -- Pareto plane -------------------------------------------
+% Source: results/plots/sdr_compute_plane.png (sdr_compute_plane.py)
+\begin{figure*}[htbp]
+\centering
+\includegraphics[width=\textwidth]{../results/plots/sdr_compute_plane.png}
+\caption{Separation quality (heart SDR, native additive rows, 95\% CI) against compute cost. Left: MACs; right: measured desktop latency. Filled markers are Pareto non-dominated on that axis. On both axes bandpass dominates every other method outright (highest SDR, lowest MACs, and, on the idle machine, lowest latency at $3.6$\,ms); an earlier revision, measured at load average 74.6, had reported Conv-TasNet-lite as jointly non-dominated on latency, which the idle re-measurement retracts.}
+\label{pi:pareto}
+\end{figure*}
+
+% ===========================================================================
+\section*{VI. Discussion inserts}
+% ===========================================================================
+
+% ---- INSERT: Paragraph -- why leakage-safe NMF underperforms the filter ----------
+% Source: report.tex sec:discussion + results/oracle_mask_ceiling_report.html (2026-09-13)
+\paragraph{Why the reproduced NMF method does not beat a fixed filter}
+Supervised NMF, reproduced with the published ranks ($K_i{=}10$, $K_r{=}20$), iteration counts, STFT hop and pre-denoising band verified against the primary source, scores $3.78$\,dB heart SDR on the native additive rows against $5.61$\,dB for a zero-parameter bandpass filter, and $-0.44$ against $3.94$\,dB on lung. Two explanations are compatible with the data. The leakage-safe pool removes every isolated recording reused in a held-out fold's mixtures, so the dictionary never sees the sources it is asked to recover; a na\"{\i}ve reproduction would keep that inflation, and the lower number is the correct one. And the fixed ranks and iteration counts may not transfer from the curated mixtures a published method was tuned on to real acoustic recordings. A third explanation --- that the dataset itself caps mask-based separation --- was tested directly with oracle masks built from each row's true heart and lung spectrograms on the same $512/256$ STFT grid the NMF uses. The ideal ratio mask, which is exactly the NMF's mask form with the true magnitudes substituted, reaches $11.5 \pm 1.9$\,dB heart and $9.2 \pm 1.7$\,dB lung SDR (95\% CI over the 36 rows), against $2.5$ and $-2.0$\,dB for the raw mixture; the ideal Wiener filter reaches $12.4$ and $10.6$\,dB. The NMF therefore sits $7.8$\,dB (heart) and $9.7$\,dB (lung) below the ceiling of its own method family, and the shortfall belongs to the dictionaries and activations, not to the dataset. The oracle does establish a ceiling of a different kind: a magnitude mask on this time-frequency grid cannot exceed roughly $12$\,dB on these recordings, which is below the $15$--$20$\,dB region where the first classifier begins to prefer the output of a spectral-stripping separator (Table~\ref{pi:knee1}). The Condition~B and knee results add a qualification to the NMF story: at $2.6$\,dB it is the method the classifiers penalise \emph{least}, never falling below the no-separation reference under either architecture, because its output is the mixture's own STFT under a mask and so keeps the spectral envelope a classifier trained on full-band recordings depends on. Whether a finer grid or a time-domain separator can pass that cap is not tested here.
+
+% ---- INSERT: Paragraph -- reconciling Condition B with Yaqub et al. --------------
+% Source: report.tex sec:yaqub (primary source read: Table 9, Sec. 6.2 of Yaqub et al.); results/condition_b_report.html
+\paragraph{Reconciling the size of the drop with Yaqub et al.}
+Yaqub et al.\ report accuracy falling from $89.0\%$ to $41.0\%$ (weighted F1 $0.89 \to 0.39$, $n{=}5365$ evaluations) when their ResNet-18, retrained on clean HLS-CMDS heart-sound data (Experiment~3, test $n{=}278$), is re-evaluated (Experiment~4, Table~9) on heart sounds bandpass-separated from the mixed recordings. Condition~B reproduces the direction for every one of six separators at roughly half the size: the drop is $11$--$25$ points under the SVM and $8$--$36$ under the CNN, and a leak-group cluster bootstrap of the row-paired difference excludes zero for three methods under the SVM (bandpass, standard NMF, EVMD) and four under the CNN (bandpass, standard NMF, MSSA, EVMD). Bandpass --- their separator --- loses $22$ points under the SVM and $36$ under the CNN here. Three differences account for most of the remaining gap and are stated rather than argued away. First, sample size and resolution: Condition~B scores 36 rows, so one recording is $2.8$ points and a binomial 95\% interval near $40\%$ is about $\pm16$ points --- a 48-point collapse would be visible at this resolution, and the difference between a 23- and a 48-point one is at its edge. Second, the isolated ceiling differs: Yaqub's classifier starts at $89\%$ on clean audio, while this project's, trained on 50 recordings under a leakage-safe split that removes every recording reused in the evaluation mixtures, starts at $53$--$62\%$; a classifier with less headroom has less to lose, and Yaqub et al.\ do not state their split, so how much of their $89\%$ rests on recording reuse across train and test cannot be determined from the paper. Third, the scored rows differ: Condition~B uses only the 36 mixtures whose recording is additive in its named sources, since on the other 109 an SDR measures the dataset's defect rather than the separator, whereas Yaqub et al.\ separate the full mixed set. None of these differences reverses the finding they share --- bandpass-separated audio classifies worse than isolated audio, and worse than the untouched mixture --- and the continuous curve places their single measured point in context: at the $5.5$\,dB a bandpass filter reaches, both classifiers here score its output below the no-separation reference, and along the interpolation protocol it would need $15$--$20$\,dB (SVM) or $8$--$9$\,dB (CNN) before separating paid for itself. One further point a single-separator study cannot make: the two methods that keep the mixture's spectral envelope (supervised NMF and Conv-TasNet) never fall below the reference under the CNN at any SDR, so the collapse Yaqub et al.\ measured is a property of what a bandpass filter discards, not of separation as such.
+
+% ---- INSERT: Closing sentences --------------------------------------------------
+\paragraph{Closing}
+On the 36 acoustically valid HLS-CMDS mixtures, the best of six separators delivers $5.5$\,dB heart-source SDR, and a downstream classifier does not begin to prefer the output of a spectral-stripping separator over the raw mixture until roughly $15$--$20$\,dB under one architecture and $8$--$9$\,dB under another --- estimated raw-mixture crossings under the stated interpolation protocol, whose bootstrap intervals reach the top of the measured grid --- a shortfall of $3$ to $15$\,dB that no method here closes, and that an oracle mask on the same time-frequency grid, capped near $12$\,dB, could only partly close. Separators that keep the mixture's spectral envelope are neutral to the classifier at every SDR reached; separators that discard it are a cost. Separation at the quality currently achievable on this dataset is therefore at best neutral and at worst harmful to a downstream classifier, and Yaqub et al.'s $89\% \to 41\%$ collapse --- measured with a bandpass filter, the class of method that discards most --- is one point on the curve this paper traces in full, and it lies where that curve says it should.
+
+\end{document}

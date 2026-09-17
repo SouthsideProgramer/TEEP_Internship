@@ -7,7 +7,16 @@ src/mix_pairing_validation.html
 results/
 HLS-CMDS.zip
 self_learning.md
-report/
+# report/: track the LaTeX sources, the Markdown logs and the built PDFs; ignore
+# only LaTeX's intermediate files. (Was `report/` wholesale until 18 Sep 2026,
+# which left the audit comment and the reports unreachable from a checkout.)
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.fls
+report/*.fdb_latexmk
+report/*.synctex.gz
 HLS_CMDS/
 papers/
 # firmware/: PlatformIO build tree, and the golden vectors the native test reads
