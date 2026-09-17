@@ -490,3 +490,10 @@ exists, and the letter goes out ~10-05.
   pins and the targets; the `teep-spike` URL in the README is a placeholder
   until then. `TEEP_Internship` is still `PRIVATE` on GitHub — flipping it
   is a one-line `gh repo edit --visibility public`, held for explicit go-ahead.
+- **Clean-clone proof, run 2 (the merge Satya's checkout will carry).** In the
+  same scratch clone, `git pull` of this repository's `faec69c` merged clean;
+  `make install` brought scikit-learn 1.9.0, threadpoolctl 3.6.0,
+  torchvision 0.18.1+cu121 exactly; `make spike-checks`: all four passed,
+  `git status` afterwards shows only `spike/out/confirm_levels.csv`
+  re-serialised; `make test`: 191 passed in 3:57. The claim in the letter's
+  last sentence is true of that checkout, on this machine, today.

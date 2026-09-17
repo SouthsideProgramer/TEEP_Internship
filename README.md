@@ -31,7 +31,7 @@ make install                     # python3 -m venv .venv && pip install -r requi
 # download HLS-CMDS v3 from https://data.mendeley.com/datasets/8972jxbpmp/3 (login required)
 # and save the archive as ./HLS-CMDS.zip -- it is CC BY 4.0 but not redistributed here
 make dataset                     # unpack into HLS_CMDS/{HS,LS,Mix}/ and verify the six release checksums
-make test                        # 30 s: metrics, split, loader, synthetic-mix, EVMD and Conv-TasNet unit tests
+make test                        # ~4 min: 191 tests -- metrics, split, loader, synthetic-mix, EVMD, Conv-TasNet, the review scripts
 ```
 
 `make dataset` refuses to run without the archive, and fails loudly if any of
