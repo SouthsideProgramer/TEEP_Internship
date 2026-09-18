@@ -1893,3 +1893,86 @@ Generated output dirs (`src/visualization/plots/`,
 
   `report.tex` Sec. 10.4 written up for the paper; `Makefile` gains
   `server-vs-board` and `mcu-feasibility` targets.
+
+## Done (2026-09-17/18 sessions) -- citation fix, release readiness, clean-clone proof
+
+- **`\bibitem{nmfcrnn}` author initials** in `report/dataset_audit_comment.tex`
+  corrected to B. Han, W. Quan, B. Matuszewski, D. Corbett -- the last
+  unapplied item of the 14 Sep review, and the reference the comment's
+  "Downstream impact" section leans on. Checked against page 1 of the
+  paper PDF, not the review note. `dataset_audit_comment_17sep.pdf` predates
+  the fix; needs an off-server rebuild (230's texenv has no `share/tlpkg`,
+  so no `pdflatex.fmt` can be made).
+
+- **Why the release row moved: the SPL letter's last sentence.** "Code,
+  commit history and every tested configuration are released" is false
+  until a public repository exists; the letter goes out ~10-05, three weeks
+  before the row's old date. Sprint 4 review (09-17) pulled it into Sprint
+  5, due 09-28, High.
+
+- **`report/` was gitignored wholesale** (the S1-12 leftover): the audit
+  comment, both reports, the paper draft and the daily log were reachable
+  from no checkout. `.gitignore` now excludes only LaTeX intermediates;
+  16 files under `report/` are tracked. The stale 09-09
+  `dataset_audit_comment.pdf` is left out on purpose.
+
+- **Three undeclared dependencies**, found by installing `requirements.txt`
+  as committed into an empty venv: `scikit-learn` and `threadpoolctl`
+  (`heart_classifier.py`) arrive only transitively via librosa and unpinned
+  -- a fresh install today gets 1.9.1/3.7.0, the results were made with
+  1.9.0/3.6.0; and `torchvision==0.18.1+cu121` (`spike/resnet_arch3.py`,
+  the ResNet-18 column of the letter's Table I), which is in neither of
+  Satya's `.freeze-*.txt` because it was installed on 09-14 14:17, after
+  both snapshots. All three pinned. Header said Python 3.11; it is 3.12.4.
+
+- **`make dataset`** -- there was no route from the Mendeley archive to the
+  `HLS_CMDS/{HS,LS,Mix}/` layout `load_dataset.py` expects. Unpacks the
+  outer zip flat, verifies the six release SHA-256s (the README's table),
+  expands the inner zips without `__MACOSX/`. Refuses without the archive.
+  **`make spike-checks`** -- the four review checks, for a `teep-spike`
+  checkout; guards with a message here.
+
+- **README rewritten** for a reader with only the checkout: two-repository
+  structure (teep-spike = this history at `c5e7d97`/`f8e11a3` + `spike/` +
+  `paper/`), five-step setup, the clean-checkout proof, a cell-by-cell map
+  of the letter's Tables I-II / Figure 1 / cluster-bootstrap paragraph to
+  scripts and released artifacts, every `\label{tab:...}` of `report.tex`
+  mapped to its `make` target and `results/` file, and what a checkout
+  cannot reproduce (board, CirCor path, GPU-trained cells, `papers/`). The
+  conda `audio_env` section it replaced described an environment that no
+  longer exists.
+
+- **Clean-clone proof, twice.** Scratch clone of `/home/satya/teep-spike`
+  (`ef9a09d`) into an empty directory, fresh venv. Run 1 with
+  `requirements.txt` as committed: `check_heldout_distinct` PASS (max |corr|
+  0.374), `check_lung_overlap` PASS (34/34/50, mean 3.26),
+  `check_labels_folds` PASS (57/50, folds 0-4 x 10), `review_checks` ran,
+  `review_bootstrap.csv` byte-identical, `confirm_levels.csv` re-serialised
+  with identical parsed values (max abs diff 0.0 -- last-digit float repr on
+  the INT rows the script does not recompute). Run 2 after merging
+  `faec69c`: pins land exactly, `make spike-checks` all four pass,
+  `make test` 191 passed in 3:57. The sentence is true of that checkout,
+  on this machine, today.
+
+- **Found but not fixable from this account.** `spike/circor.py:21`
+  hardcodes `/home/satya/data/circor`, so the CirCor row of Table II does
+  not reproduce off 230; `report/circor_env_path.patch` (untracked, applies
+  cleanly to `ef9a09d`) makes it `CIRCOR_DIR`-overridable, default unchanged.
+  `teep-spike` has no push remote (`DISABLED-do-not-push`). Handoff in
+  `report/README_for_satya.md`.
+
+- Commits: `faec69c`, `9937815`, pushed to origin (still PRIVATE).
+
+## Open / next up (updated 2026-09-18)
+
+- **Flip `TEEP_Internship` to public** -- `gh repo edit --visibility public`;
+  held for an explicit go-ahead. Pre-flight sweep of tracked files: no
+  secrets, emails or IPs.
+- **teep-spike public** (Satya): create the repo and push; `git merge
+  thang-github/main` (clean, verified); apply `circor_env_path.patch`. Then
+  the proof once more from the GitHub URL, and fill the URL into README.md.
+- **Rebuild `dataset_audit_comment` PDF** off-server (bibitem fix).
+- Carried over from 09-13: synthetic-substrate sweep + classifiers, Arch 2
+  second seed / nested selection, lung-side Condition A/B, per-condition
+  standardised-distance report, Baseline 2 port, ESP32-S3 hardware run,
+  embedded-clip representativeness note.
