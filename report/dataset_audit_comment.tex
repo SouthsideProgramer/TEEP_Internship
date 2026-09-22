@@ -14,8 +14,18 @@
 
 \title{Comment on ``Descriptor: Heart and Lung Sounds Dataset Recorded from\\
 a Clinical Manikin using Digital Stethoscope (HLS-CMDS)''}
-\author{Satya Adhiyaksa, Nguyễn Quốc Thắng, Jenq-Shiou Leu}
-\date{Draft -- 2026-08-26}
+\author{%
+  Satya Adhiyaksa\\
+  \small National Taiwan University of Science and Technology (NTUST), Taiwan\\
+  \small \texttt{m11302825@mail.ntust.edu.tw}
+  \and
+  Nguyễn Quốc Thắng\\
+  \small Ho Chi Minh City University of Technology (HCMUT),\\
+  \small Vietnam National University Ho Chi Minh City, Vietnam
+  \and
+  Jenq-Shiou Leu\\
+  \small National Taiwan University of Science and Technology (NTUST), Taiwan}
+\date{\today}
 
 \begin{document}
 \maketitle
@@ -45,16 +55,18 @@ their stated heart/lung sources; the remaining 109 are not. We also report a
 sample-rate gap: every released file measures 4{,}000~Hz, while the only
 sample rate the descriptor gives is 22{,}050~Hz, stated as a specification
 of the recording instrument; the section describing the released files does
-not state their rate at all. We report both findings here,
-separately from our own
-separation-methods work, because they bear on the validity of ground truth
-used by at least four published studies that build on this dataset, not
-just our own.
+not state their rate at all. We report both findings here, separately from
+our own separation-methods work, because the first bears on ground truth
+already in use downstream. Of the four published studies we are aware of
+that build on HLS-CMDS, two evaluate on all 145 rows, and for one of them
+the exposure is measurable from its own tables: 4{,}033 of the 5{,}365
+scored windows behind its headline result fall on rows we find
+non-additive (Section~\ref{sec:impact}).
 \end{abstract}
 
 \section{Motivation for this comment}
 
-This comment is deliberately kept separate from our companion methods paper
+This comment is deliberately kept separate from our companion methods paper (in preparation)
 on leakage-safe heart/lung separation evaluation. That paper's contribution
 is a separation pipeline and baseline comparison; the findings below are
 about the integrity of the released dataset itself, and are relevant to
@@ -174,20 +186,81 @@ know which rate its author actually worked at.
 \label{sec:impact}
 
 We are aware of four published studies that build on HLS-CMDS
-\cite{aidriven,spectrotemporal,nmfcrnn,edgelung}. Two of them
-\cite{spectrotemporal,edgelung} run their separation method directly on
-\texttt{Mix.csv}'s paired mixed recordings and use the listed heart/lung IDs
-as ground truth; neither reports having verified that the mixed recording
-is actually an additive combination of those sources. If either study's
-evaluation set includes rows outside the 36 we identify as additive, their
-reported separation behavior on those rows was measured against a ground
-truth that does not describe the mixed signal they were separating. A third
-study \cite{nmfcrnn} uses only the isolated \texttt{HS.csv}/\texttt{LS.csv}
-recordings as an auxiliary dictionary-learning corpus, not \texttt{Mix.csv}
-directly, and so is exposed to the sample-rate question
-(Section~\ref{sec:samplerate}) but not to the additivity finding. None of
-the four papers reports an independent integrity check of the kind
-described here.
+\cite{aidriven,spectrotemporal,nmfcrnn,edgelung}. We determined, from each
+paper's own text, tables and figures, which \texttt{Mix.csv} rows it
+evaluates on (Table~\ref{tab:downstream}).
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{\texttt{Mix.csv} rows entering each downstream study's evaluation,
+as determined from that study's own text and tables. ``Outside the 36''
+counts rows that fail the additivity test of
+Section~\ref{sec:additivity}.}
+\label{tab:downstream}
+\begin{tabular}{@{}p{0.16\textwidth}p{0.40\textwidth}p{0.34\textwidth}@{}}
+\toprule
+Study & \texttt{Mix.csv} rows evaluated on & Outside the 36 additive rows \\
+\midrule
+Torabi \cite{aidriven} &
+None. The separation chapters build their own mixtures: \S4.2.3 (p.~52)
+re-pairs HLS-CMDS heart and lung segments at random into 25{,}000
+mixtures; \S4.1.3 (p.~41) reports ``210 clinical manikin recordings'',
+which is neither 145 nor identified as \texttt{Mix.csv}. \S5.5 (p.~65) and
+\S6.2.2 (p.~72) use the 50 isolated heart and 50 isolated lung recordings
+only. &
+0. The \S4.1.3 evaluation set is \emph{not stated}; we record that as a
+finding rather than infer it. \\
+\addlinespace
+Yaqub et al.\ \cite{spectrotemporal} &
+All 145. \emph{Not stated in the text.} Table~9 (p.~2528) reports 5{,}365
+scored windows on bandpass-separated heart sounds; segmentation is into
+400~ms windows (p.~2514), giving 37 whole windows per 15~s recording, and
+$145 \times 37 = 5365$. Its four per-class supports (481 / 2109 / 1147 /
+1628) equal 37 times \texttt{Mix.csv}'s own per-class row counts (13 / 57 /
+31 / 44) exactly, for every class. &
+109 of 145 rows, i.e.\ \textbf{4{,}033 of the 5{,}365 windows (75.2\%)}, by
+class: 333 Normal, 1{,}628 Murmur, 851 Extra Sound, 1{,}221 Rhythm
+Disorder. \\
+\addlinespace
+Han et al.\ \cite{nmfcrnn} &
+None scored. HLS-CMDS is ``used exclusively for dictionary learning and
+[was] not included in the respiratory disease classification experiments''
+(\S3.2.3, p.~7). \emph{Which} isolated recordings the dictionaries were fit
+on is not stated. Figure~3 (p.~8) does show one mixture beside a
+ground-truth respiratory signal; its provenance is not stated. &
+0 scored; 1 unidentified row in a qualitative figure. \\
+\addlinespace
+Puneet et al.\ \cite{edgelung} &
+All 145, \emph{stated}: the lung-isolation algorithm ``is evaluated on the
+HLS CMS dataset,'' enumerated as Normal~(28), Wheezing~(28), Pleural
+Rub~(25), Rhonchi~(23), Fine Crackles~(22), Coarse Crackles~(19) (p.~23) --
+summing to 145 and matching \texttt{Mix.csv}'s lung-type distribution on
+every class. &
+109 of 145 rows (75.2\%): 18 Normal, 16 Wheezing, 24 Pleural Rub, 21
+Rhonchi, 13 Fine Crackles, 17 Coarse Crackles. No separation metric is
+reported on them; the 80.55\% accuracy (p.~24) is measured on \texttt{HF\_Lung}~V1
+(p.~23), not on HLS-CMDS. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two of the four therefore evaluate on the full 145 rows, and so on 109 rows
+whose mixed recording is not an additive combination of its listed sources.
+For Yaqub et al.\ \cite{spectrotemporal} this is measurable: 4{,}033 of the
+5{,}365 windows behind the 41.0\% accuracy of their Table~9 carry a heart
+sound class label taken from a heart recording that our audit finds absent
+from the audio being classified. Puneet et al.\ \cite{edgelung} run their
+EVMD separation over the same 109 rows but report no metric against the
+listed sources, so the exposure there is to the illustrated separation
+quality rather than to a published number. The remaining two are not
+exposed to the additivity finding: Torabi \cite{aidriven} constructs its own
+mixtures rather than using \texttt{Mix.csv}'s, and Han et al.\
+\cite{nmfcrnn} use HLS-CMDS only to fit dictionaries. None of the four
+papers reports an independent integrity check of the kind described here,
+and two of them -- Torabi's \S4.1.3 and Han et al.'s Figure~3 -- do not
+state which recordings they used, so the exposure of those two cannot be
+settled from the published text at all.
 
 We raise this not to characterize any of these results as incorrect, but
 because none of the four papers had the means to know whether it applied --
@@ -199,7 +272,9 @@ to a handful of files; it required a systematic per-row check.
 We suggest the descriptor be amended, or an erratum issued, to note: (1)
 that only 36 of 145 \texttt{Mix.csv} rows are additive combinations of their
 listed sources, with row IDs enumerated above, so that downstream users can
-restrict evaluation to the valid subset or account for the rest; and (2)
+restrict evaluation to the valid subset or account for the rest --- two
+published studies already evaluate on all 145
+(Section~\ref{sec:impact}); and (2)
 the sample-rate finding of Section~\ref{sec:samplerate} once resolved. We
 would welcome the opportunity to share our audit code directly with the
 authors if useful for reproducing or disputing this finding.
@@ -208,9 +283,12 @@ authors if useful for reproducing or disputing this finding.
 \label{sec:availability}
 
 The additivity check (\texttt{verify\_additive\_triplets()}) and the
-clipping-based audio-quality scan referenced above are both part of the
-public pipeline accompanying our companion methods paper, and are
-independently re-runnable against any copy of HLS-CMDS.
+clipping-based audio-quality scan referenced above are available at
+\url{https://github.com/SouthsideProgramer/TEEP_Internship} (commit
+\texttt{88c0ef8}), and are independently re-runnable against any copy of
+HLS-CMDS: \texttt{make install}, \texttt{make dataset} (which verifies the
+six release checksums), then the audit targets. No part of the dataset is
+redistributed there.
 
 \begin{thebibliography}{9}
 
@@ -223,7 +301,9 @@ doi:10.1109/IEEEDATA.2025.3566012.
 \bibitem{aidriven}
 Y.~Torabi, ``AI-Driven Cardiorespiratory Signal Processing: Separation,
 Clustering, and Anomaly Detection,'' Ph.D.\ dissertation, McMaster
-University, 2025.
+University, 2025. Page numbers cited above refer to
+\texttt{arXiv:2602.09210v1} (xxi\,+\,123~pp.), the author's posting of the
+same thesis.
 
 \bibitem{spectrotemporal}
 A.~Yaqub, M.~S.~Orakzai, M.~F.~Qureshi, Z.~Mushtaq, I.~Siddique, and

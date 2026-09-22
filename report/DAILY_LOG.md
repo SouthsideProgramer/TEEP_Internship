@@ -497,3 +497,136 @@ exists, and the letter goes out ~10-05.
   `git status` afterwards shows only `spike/out/confirm_levels.csv`
   re-serialised; `make test`: 191 passed in 3:57. The claim in the letter's
   last sentence is true of that checkout, on this machine, today.
+
+## 2026-09-22 — Audit comment §5 quantified; CirCor robustness spike, and GPU nondeterminism
+
+Two threads. The second was not planned at the start of the day.
+
+### Audit comment: §5 turned from a conditional into a table
+
+- `report/dataset_audit_comment.tex` §5 rewritten. The old text said "**if**
+  either study's evaluation set includes rows outside the 36 …", which an
+  editor can wave away. It now carries `tab:downstream`: per paper, which
+  `Mix.csv` rows enter its evaluation, with a page or table number on every
+  figure, and "not stated" recorded as the finding where a paper is silent.
+- `[spectrotemporal]` (Yaqub): **all 145 rows, not stated in the text but
+  reconstructed exactly**. Table 9 (p. 2528) scores 5,365 windows; 400 ms
+  windows (p. 2514) give 37 whole windows per 15 s recording; 145 × 37 = 5365.
+  The check that settles it is per-class — Table 9's supports
+  (481 / 2109 / 1147 / 1628) equal 37 × `Mix.csv`'s own per-class row counts
+  (13 / 57 / 31 / 44) for **every one of the four classes**. So
+  **4,033 of the 5,365 windows (75.2%)** behind its 41.0% headline sit on
+  rows the audit finds non-additive.
+- `[edgelung]` (Puneet): **all 145, stated** (p. 23) — the six lung-class
+  counts printed there (28/28/25/23/22/19) match `Mix.csv`'s lung-type
+  distribution on every class. But **no separation metric is reported on
+  them**; the 80.55% (p. 24) is HF_Lung V1 (p. 23). The old §5 wording ("use
+  the listed heart/lung IDs as ground truth") was wrong about this.
+- `[nmfcrnn]` (Han): **none scored** — "used exclusively for dictionary
+  learning … not included in the … classification experiments" (§3.2.3, p. 7).
+  Two "not stated"s: which isolated recordings the dictionaries were fit on,
+  and the provenance of Figure 3's (p. 8) mixture + ground-truth pair. The old
+  §5 claim that Han never touches `Mix.csv` overstated it by one figure.
+- `[aidriven]` (Torabi): **none** — §4.2.3 (p. 52) re-pairs HLS-CMDS segments
+  into 25,000 mixtures of its own; §4.1.3 (p. 41) uses "210 clinical manikin
+  recordings" (not 145, HLS-CMDS unnamed — not stated); §5.5 (p. 65) and
+  §6.2.2 (p. 72) use the 50+50 isolated recordings.
+- Abstract corrected: it claimed the findings bear on ground truth used by
+  "at least four published studies", which now contradicts the paper's own
+  table. **Two** of the four evaluate on `Mix.csv`. PDF rebuilt 15:09, 5 pp.,
+  clean. `pdflatex` is at `~/texlive/2026/bin/x86_64-linux`, not on `PATH` —
+  the 09-17 note that the server cannot build is wrong; tectonic cannot (it is
+  XeTeX-only and the T5 author line needs pdfTeX's `t5-lmr`), pdflatex can.
+- **`[aidriven]` cross-checked at last.** The thesis is on arXiv as
+  `2602.09210v1` (xxi+123 pp.); added to `papers/` 15:05. PROTOCOL.md's "the
+  one exception" note and its §2 row rewritten from the full text. Two
+  corrections it forces: the row said separation metrics were "not reported
+  (paired t-test on an unspecified quality proxy)" — wrong, SDR/SIR/SAR are at
+  Eqs. 4.9–4.11 (p. 42) with 95% CIs in Fig. 4.4 and Table A.1 (p. 82); and
+  **`report/paper.tex` §1's "26.8 dB on this dataset" is wrong** — 26.8 dB is
+  VAE-WMT on "Dataset One" (Kaggle + CirCor + Chest Wall), Table A.2 (p. 83);
+  on HLS-CMDS ("Dataset Two") the same model scores **15.1 dB**. Still open.
+
+### CirCor robustness spike (`~/spike-review`, branch `circor-robust`, not pushed)
+
+Brief: after the 17 Sep resampling-unit sensitivity, ResNet-18's HLS-CMDS
+R1/R2 intervals contain 0 under source-type clustering and only the small CNN
+survives, so the letter's only real-patient branch was also the only place
+ResNet-18 still held — on one architecture, one lung draw. Scope: pre-register
+first, add the small CNN, 3 lung draws, everything else fixed.
+
+- `spike/CIRCOR_ROBUST.md` written and committed (`d541754`, 15:24) **before
+  `spike/circor_robust.py` existed**, per the `HYPOTHESIS.md`/`CIRCOR.md`
+  convention. `spike/circor_robust.py` committed before being run
+  (`93394cc`, 15:28); it imports `circor.py`'s label rule, groups, split, crop,
+  conditions, windows, optimiser and stopping rule rather than restating them.
+- **Run 1 died: `CUDA OOM`, 500 MiB**, in the validation pass of
+  `resnet18/unmatched/seed0` — `circor.py` splits validation and prediction
+  into 4096-window batches and another job held 9.65 of the 12 GB card.
+  Fixed to 512 (`db345e7`, 15:47) after checking it changes nothing: BatchNorm
+  is in eval mode, so 4096 vs 512 agrees to **2.7e-7** with identical argmax on
+  both architectures. Training batch 32 untouched.
+- **Run 2 completed and failed G3.** SDRs reproduced *exactly*
+  (BAND +6.2 / INT +1.3 / SEP_B1 −2.6) and the split reproduced at
+  486 / 86 / 244 groups, so the data path is bit-faithful. But R1 came back
+  **+14.8 vs the 14 Sep +11.1**, R2 **+20.6 vs +17.6**, with different stopping
+  epochs.
+- **Cause: `spike/circor.py` is not reproducible.** `cudnn.deterministic` is
+  `False`, so ResNet-18's conv backward accumulates nondeterministically.
+  Measured: the *same* `fit_es`, same seed, same data, run twice → different
+  weights (max abs diff **9.5e-2**) and epochs **8 vs 6**; `fit_es` vs
+  `circor.fit_es` differ by the same order (1.7e-1, 8 vs 11). One function run
+  twice diverges as much as two different functions. **The letter's published
+  R1 +11.1 / R2 +17.6 are one draw from a distribution.** The three seeds
+  average over initialisation, not over cuDNN.
+  - The 09-18 README line — GPU cells "not bit-reproducible across GPUs or
+    CUDA builds" — understates this: they are not bit-reproducible on the
+    *same* GPU and CUDA build. That line needs correcting. It also lists the
+    log-Mel CNN as GPU-trained; `src/heart_classifier_cnn.py` never touches
+    CUDA and runs on CPU.
+- **G3 amended, tolerance not widened** (`9ddc3a0`, 17:34), written before R1
+  or R2 were read for either architecture, disclosing what the failure had
+  already printed. G3's ±1.0 BA half compared against a quantity that is not
+  reproducible, so it was *replaced*, not loosened: G3a keeps the SDR
+  comparison (data path is CPU/numpy and does reproduce); **G3b** requires a
+  refit of `resnet18/unmatched/seed0` to be **bit-identical** under
+  deterministic mode.
+- `spike/determinism.py` (`2491607`, 17:37) — `use_deterministic_algorithms` +
+  `cudnn.deterministic` + `CUBLAS_WORKSPACE_CONFIG=:4096:8`, called from both
+  scripts' `main()`. Also `.gitignore` for `spike/out/*_cache/`: a stray
+  `git add -A` had committed the 2.8 GB condition cache and pushed `.git` to
+  2.0 GB; reset, unstaged, gc'd back to 60 MB. Neither `circor_cache` nor
+  `confirm_cache` is tracked upstream.
+- **Run 3 died too** — `circor.py` had been given the determinism call but not
+  the batch fix, so the baseline rerun OOM'd at the identical line. Fixed
+  (`130b909`, 17:46); `INFER_BATCH` now has one definition.
+- **Result (`d489242`, 19:10).** Deterministic, 2 architectures, 3 draws,
+  244 test groups. G3a passed exactly; **G3b passed — parameters bit-identical,
+  epoch 6 reproduced**, so these numbers rerun.
+
+  | arch | G2 | R1 | R2 |
+  |---|---|---|---|
+  | `resnet18` | 0.737 | **+15.2** [+12.1, +18.1] | **+21.1** [+17.8, +23.9] |
+  | `small_cnn` | 0.644 | **+6.8** [+3.6, +10.0] | **+6.6** [+4.4, +8.8] |
+
+  All four intervals exclude 0. Verdict per the pre-registered rule: **the
+  effect is a property of band-limiting, not of one architecture** — though
+  the magnitude is 2–3× smaller on the CNN, so the letter's claim is "not an
+  artifact of ResNet-18", not "the architectures agree".
+- **Three lung draws turned out not to be needed.** Per-draw R1: resnet
+  15.3 / 15.1 / 15.0, cnn 7.5 / 6.9 / 6.1 — spread **≤0.3 points** on resnet.
+  One draw was always enough; what moved the old numbers ~3 points was GPU
+  nondeterminism, not draw luck. This retroactively vindicates `CIRCOR.md`'s
+  single draw.
+- Still running at 19:28: `spike/circor.py` deterministic, to give the letter a
+  baseline that reproduces. Queued after it: `spike/resnet_arch3.py` under
+  determinism — of the four rows in `review_bootstrap.csv`, `cnn`, `svm` and
+  `svm_tuned` are CPU/deterministic and only `resnet` is GPU-trained
+  (`resnet_arch3.py:22`), so the 17 Sep "only the CNN survives type-clustering"
+  rests, on its ResNet half, on one nondeterministic draw. To flip it the point
+  estimate would have to move ~8–10 points against the ~3 seen on CirCor, but
+  HLS-CMDS is 50 recordings not 1,695, so that is arithmetic, not a rerun.
+- Handoff still blocked: `SouthsideProgramer/teep-spike` does not exist on
+  GitHub (`gh repo view` → "Could not resolve"), so the seven commits sit on a
+  local branch whose origin is Satya's working copy. Nothing pushed; Satya's
+  tree untouched (read-only to this account anyway).

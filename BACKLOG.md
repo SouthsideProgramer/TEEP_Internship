@@ -1976,3 +1976,70 @@ Generated output dirs (`src/visualization/plots/`,
   second seed / nested selection, lung-side Condition A/B, per-condition
   standardised-distance report, Baseline 2 port, ESP32-S3 hardware run,
   embedded-clip representativeness note.
+
+## Done (2026-09-22 session) -- §5 of the audit comment made quantitative
+
+- **`report/dataset_audit_comment.tex` §5 (Downstream impact)** -- replaced
+  the conditional ("*if* either study's evaluation set includes rows outside
+  the 36...") with a table (`tab:downstream`) naming, per paper, which
+  `Mix.csv` rows enter its evaluation and how much of that falls outside the
+  36 additive rows. Every figure carries a page or table number; where a
+  paper doesn't say, "not stated" is recorded as the finding.
+  - `[spectrotemporal]` (Yaqub): **all 145**, not stated in the text but
+    reconstructed exactly. Table 9 (p. 2528) scores 5,365 windows; 400 ms
+    windows (p. 2514) give 37 whole windows per 15 s recording, and
+    145x37 = 5365. The check that settles it is per-class: Table 9's four
+    supports (481/2109/1147/1628) equal 37x `Mix.csv`'s own per-class row
+    counts (13/57/31/44) for **every** class. -> 109 rows = **4,033 of the
+    5,365 windows (75.2%)** outside the additive 36.
+  - `[edgelung]` (Puneet): **all 145, stated** (p. 23) -- the six lung-class
+    counts they print (28/28/25/23/22/19) match `Mix.csv`'s lung-type
+    distribution on every class. -> 109 rows (75.2%). But they report **no**
+    separation metric on those rows; the 80.55% (p. 24) is HF_Lung V1
+    (p. 23). The old §5 wording ("use the listed heart/lung IDs as ground
+    truth") was wrong about this.
+  - `[nmfcrnn]` (Han): **none scored** -- "used exclusively for dictionary
+    learning ... not included in the ... classification experiments"
+    (§3.2.3, p. 7). Two "not stated"s: which isolated recordings the
+    dictionaries were fit on, and the provenance of Figure 3's (p. 8)
+    mixture + ground-truth respiratory pair. The old §5 claim that Han is
+    untouched by `Mix.csv` overstated it by one figure.
+  - `[aidriven]` (Torabi): **none** -- §4.2.3 (p. 52) re-pairs HLS-CMDS
+    segments into 25,000 mixtures of its own; §4.1.3 (p. 41) uses "210
+    clinical manikin recordings" (not 145, HLS-CMDS unnamed -- not stated);
+    §5.5 (p. 65) and §6.2.2 (p. 72) use the 50+50 isolated recordings.
+  - Verified against the release: the 36/109 split re-derived from
+    `verify_additive_triplets()`, and the per-class counts from `Mix.csv`.
+
+- **`[aidriven]` cross-checked at last** -- the thesis is posted in full as
+  arXiv:2602.09210v1 (xxi+123 pp.) and is now in `papers/2602.09210v1.pdf`
+  (untracked; `papers/` is gitignored). PROTOCOL.md's "the one exception"
+  note and its §2 related-work row are updated from it. Two corrections it
+  forces:
+  - **Separation metrics**: the row said "not reported (paired t-test on an
+    unspecified quality proxy)". Wrong -- SDR/SIR/SAR are defined at
+    Eqs. 4.9-4.11 (p. 42) and plotted with 95% CIs in Fig. 4.4; Table A.1
+    (p. 82) gives LingoNMF SIR 22.4 / SAR 25.2 / SDR 22.3 dB (that table's
+    dataset is not stated).
+  - **`report/paper.tex` §1 is wrong and still needs fixing**: it reads
+    "Torabi et al. report separation quality *on this dataset* with SDR
+    figures as high as 26.8 dB". 26.8 dB is VAE-WMT on **Dataset One**
+    (Kaggle Respiratory + CirCor + Chest Wall), per §4.2.3 (p. 52) and
+    Table A.2 (p. 83). On HLS-CMDS ("Dataset Two") the same model scores
+    **15.1 dB**.
+
+- **`dataset_audit_comment` PDF rebuilt on-server** -- the 09-18 open item
+  ("rebuild off-server") is unblocked: `pdflatex` is at
+  `~/texlive/2026/bin/x86_64-linux`, not on `PATH`. Prepend it and the file
+  builds clean (5 pp., no errors, no overfull boxes, no undefined refs).
+  Tectonic can't build this file -- it is XeTeX-only and the T5 Vietnamese
+  author line needs pdfTeX's `t5-lmr` metrics.
+
+## Open / next up (updated 2026-09-22)
+
+- **Fix `report/paper.tex` §1's 26.8 dB attribution** (see above) -- and
+  re-check `tab:related`'s `torabi_diss` row, whose 26.8 dB is flagged in
+  the 09-13 log as "as cited in the paper's own Sec. II" precisely because
+  the dissertation wasn't in `papers/`. It is now.
+- Everything carried over from 09-18 (public flip, teep-spike, synthetic
+  substrate, Arch 2, lung-side Condition A/B, ESP32-S3 run).
